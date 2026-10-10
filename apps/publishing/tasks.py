@@ -1,0 +1,187 @@
+"""The publishing pipeline.
+
+dispatch_due_targets (beat, every few seconds)
+    → claims due targets with SELECT … FOR UPDATE SKIP LOCKED
+    → publish_target.delay(id) for each
+publish_target
+    → refresh credentials → validate → provider.publish
+    → success: store id/url, schedule first metrics pull
+    → transient error: back off and let the dispatcher retry
+    → auth error: flag the channel for reconnection
+"""
+
+import logging
+from datetime import timedelta
+from pathlib import Path
+
+from celery import shared_task
+from django.db import transaction
+from django.utils import timezone
+
+from apps.channels.models import ChannelStatus
+from apps.channels.providers import Content, MediaItem, ProviderError
+from apps.platform import conf
+
+from .models import PostTarget, TargetStatus
+
+log = logging.getLogger(__name__)
+DISPATCH_BATCH = 200
+STUCK_AFTER = timedelta(minutes=20)
+
+
+def build_content(target: PostTarget) -> Content:
+    media = []
+    for a in target.effective_media():
+        media.append(
+            MediaItem(
+                path=Path(a.file.path),
+                url=a.public_url,
+                mime=a.mime,
+                alt=a.alt_text,
+                width=a.width,
+                height=a.height,
+                size=a.size,
+                filename=a.original_name or Path(a.file.name).name,
+            )
+        )
+    post = target.post
+    return Content(
+        text=target.effective_body,
+        title=target.effective_title,
+        link=post.link,
+        media=media,
+        options=target.options or {},
+        idempotency_key=f"markette-target-{target.pk}",
+        tags=post.tags or [],
+    )
+
+
+def backoff(attempts, retry_after=None):
+    if retry_after:
+        return timedelta(seconds=min(max(retry_after, 30), 6 * 3600))
+    return timedelta(seconds=min(60 * 2 ** (attempts - 1), 3600))
+
+
+@shared_task
+def dispatch_due_targets():
+    if conf.publishing_paused():
+        return 0
+    now = timezone.now()
+    with transaction.atomic():
+        due = list(
+            PostTarget.objects.select_for_update(skip_locked=True)
+            .filter(
+                status=TargetStatus.SCHEDULED,
+                scheduled_at__lte=now,
+                channel__status=ChannelStatus.ACTIVE,
+                # Suspended organizations and archived workspaces publish nothing.
+                post__workspace__archived_at__isnull=True,
+                post__workspace__organization__status="active",
+            )
+            .exclude(next_attempt_at__gt=now)
+            .order_by("scheduled_at")[:DISPATCH_BATCH]
+        )
+        ids = [t.pk for t in due]
+        if ids:
+            PostTarget.objects.filter(pk__in=ids).update(status=TargetStatus.QUEUED, queued_at=now)
+            transaction.on_commit(lambda: [publish_target.delay(i) for i in ids])
+    # Targets whose channel lost its authorization fail visibly instead of waiting forever.
+    stale = PostTarget.objects.filter(
+        status=TargetStatus.SCHEDULED,
+        scheduled_at__lte=now - timedelta(minutes=5),
+    ).exclude(channel__status=ChannelStatus.ACTIVE)
+    for t in stale.select_related("channel", "post"):
+        t.status = TargetStatus.FAILED
+        t.last_error = f"Channel {t.channel.name} needs to be reconnected."
+        t.save(update_fields=["status", "last_error", "updated_at"])
+        t.post.refresh_status()
+    return len(ids)
+
+
+@shared_task(acks_late=True)
+def publish_target(target_id):
+    with transaction.atomic():
+        target = (
+            PostTarget.objects.select_for_update()
+            .select_related("channel", "post__workspace")
+            .filter(pk=target_id)
+            .first()
+        )
+        if target is None or target.status != TargetStatus.QUEUED:
+            return "skipped"
+        target.status = TargetStatus.PUBLISHING
+        target.attempts += 1
+        target.save(update_fields=["status", "attempts", "updated_at"])
+    target.post.refresh_status()
+
+    channel = target.channel
+    provider = channel.get_provider()
+    try:
+        provider.refresh_credentials()
+        content = build_content(target)
+        problems = provider.validate(content)
+        if problems:
+            raise ProviderError(" ".join(problems))
+        content, first_comment = provider.prepare_first_comment(content)
+        result = provider.publish(content)
+    except ProviderError as exc:
+        return _handle_failure(target, exc)
+    except Exception as exc:  # noqa: BLE001 - a bug must not leave the target stuck in "publishing"
+        log.exception("Unexpected error publishing target %s", target_id)
+        return _handle_failure(target, ProviderError(f"Internal error: {exc}"))
+
+    now = timezone.now()
+    target.status = TargetStatus.PUBLISHED
+    target.published_at = now
+    target.external_id = result.external_id
+    target.external_url = result.url[:1000]
+    target.last_error = ""
+    target.next_attempt_at = None
+    target.next_metrics_at = now + timedelta(hours=1) if provider.capabilities.has_metrics else None
+    target.extra = {**(target.extra or {}), **{k: v for k, v in result.extra.items() if v is not None}}
+    if result.extra.get("note"):
+        # Published, but with a caveat worth showing (e.g. YouTube kept the video private).
+        target.last_error = f"Published, but {result.extra['note'][0].lower()}{result.extra['note'][1:]}"
+    if first_comment:
+        # The post is live: a failing comment is reported but never retried (no duplicate posts).
+        try:
+            target.extra["first_comment_id"] = provider.post_first_comment(result.external_id, first_comment)
+        except ProviderError as exc:
+            target.last_error = f"Published, but the first comment could not be posted: {exc}"[:4000]
+    target.save()
+    target.post.refresh_status()
+    log.info("Published target %s on %s: %s", target.pk, channel.provider, result.url)
+    return "published"
+
+
+def _handle_failure(target, exc: ProviderError):
+    target.last_error = str(exc)[:4000]
+    if exc.auth:
+        target.channel.mark_needs_reauth(str(exc))
+        target.status = TargetStatus.FAILED
+    elif exc.retryable and target.attempts < conf.get("PUBLISH_MAX_ATTEMPTS"):
+        target.status = TargetStatus.SCHEDULED
+        target.next_attempt_at = timezone.now() + backoff(target.attempts, exc.retry_after)
+    else:
+        target.status = TargetStatus.FAILED
+    target.save(update_fields=["status", "last_error", "next_attempt_at", "updated_at"])
+    target.post.refresh_status()
+    log.warning("Publishing target %s failed (%s): %s", target.pk, target.status, exc)
+    return target.status
+
+
+@shared_task
+def requeue_stuck_targets():
+    cutoff = timezone.now() - STUCK_AFTER
+    # Never handed to a worker (broker hiccup): safe to retry.
+    requeued = PostTarget.objects.filter(status=TargetStatus.QUEUED, queued_at__lt=cutoff).update(
+        status=TargetStatus.SCHEDULED,
+        updated_at=timezone.now(),
+    )
+    # A worker died mid-call: the post may or may not be live, so do not risk a duplicate.
+    for t in PostTarget.objects.filter(status=TargetStatus.PUBLISHING, updated_at__lt=cutoff).select_related("post"):
+        t.status = TargetStatus.FAILED
+        t.last_error = "Publishing was interrupted; check the channel before retrying to avoid a duplicate."
+        t.save(update_fields=["status", "last_error", "updated_at"])
+        t.post.refresh_status()
+    return requeued

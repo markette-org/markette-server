@@ -1,0 +1,7041 @@
+openapi: 3.0.3
+info:
+  title: Markette API
+  version: 1.0.0
+  description: |2
+
+    The Markette REST API is what the Markette web app itself uses. With it you can publish, schedule and
+    measure posts across social networks and websites from your own scripts and tools.
+
+    ## Authentication
+
+    Create a **personal API token** in *Settings → API & MCP* and send it with every request:
+
+    ```
+    Authorization: Bearer mkt_xxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+
+    A token acts as you. It has your roles in every workspace, team channel access and approval rules
+    included. Revoke it at any time from the same page. Short-lived JWTs (`POST /api/auth/token/`) are also
+    accepted; they're what the web app uses.
+
+    ## Workspaces
+
+    Most endpoints work inside one workspace. Pass its slug in the **`X-Workspace`** header:
+
+    ```
+    X-Workspace: acme
+    ```
+
+    `GET /api/workspaces/` lists the workspaces you can use, with your role and the workspace time zone.
+
+    ## Quick start
+
+    ```bash
+    TOKEN=mkt_…
+    API=https://your-markette-host/api
+
+    # 1. Your workspaces and channels
+    curl -H "Authorization: Bearer $TOKEN" $API/workspaces/
+    curl -H "Authorization: Bearer $TOKEN" -H "X-Workspace: acme" $API/channels/
+
+    # 2. Create a draft for two channels (per-channel text is optional)
+    curl -X POST -H "Authorization: Bearer $TOKEN" -H "X-Workspace: acme" -H "Content-Type: application/json" \
+      -d '{"body": "We are live!", "targets": [{"channel": 12}, {"channel": 15, "body": "Short version for X"}]}' \
+      $API/posts/
+
+    # 3. Schedule it: now, at an exact time, in the next queue slot, or at each channel's best time
+    curl -X POST -H "Authorization: Bearer $TOKEN" -H "X-Workspace: acme" -H "Content-Type: application/json" \
+      -d '{"mode": "best_time", "window_start": "2026-10-12T08:00:00+02:00", "window_end": "2026-10-14T20:00:00+02:00"}' \
+      $API/posts/42/schedule/
+    ```
+
+    A schedule call returns **202** instead of 200 when a team requires approval. The post is then waiting
+    for a reviewer (`approval_status: "pending"`).
+
+    ## Conventions
+
+    * **Lists** are paginated with `?limit=` and `?offset=` and return `{count, next, previous, results}`. The
+      calendar and queue slots return plain arrays.
+    * **Times** are ISO 8601 with an offset. Stored and returned in UTC; the workspace time zone is used for
+      queues, best times and analytics days.
+    * **Errors** use standard HTTP codes. The body is `{"detail": "…"}` or `{"field": ["…"]}`.
+      * 400: validation.
+      * 401: missing or invalid credentials.
+      * 403: role, archived workspace or suspended organization.
+      * 404: not found, or not in your workspace.
+      * 429: slow down.
+    * **Media**: upload with `POST /api/media/` (multipart field `file`), then reference the returned ids in
+      `media_ids`.
+
+    ## MCP
+
+    The same capabilities are available to AI assistants through the Model Context Protocol at `/mcp`, with the
+    same tokens. See *Settings → API & MCP* for client setup.
+paths:
+  /api/analytics/audience/:
+    get:
+      operationId: analytics_audience_retrieve
+      summary: Follower counts over time
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: query
+        name: from
+        schema:
+          type: string
+        description: YYYY-MM-DD
+      - in: query
+        name: to
+        schema:
+          type: string
+        description: YYYY-MM-DD
+      tags:
+      - analytics
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/analytics/overview/:
+    get:
+      operationId: analytics_overview_retrieve
+      summary: Totals, per-channel performance, daily series and top posts
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: query
+        name: campaign
+        schema:
+          type: string
+        description: Campaign id
+      - in: query
+        name: channels
+        schema:
+          type: string
+        description: Comma-separated channel ids
+      - in: query
+        name: from
+        schema:
+          type: string
+        description: 'Start date YYYY-MM-DD (default: 30 days ago)'
+      - in: query
+        name: team
+        schema:
+          type: string
+        description: Team id
+      - in: query
+        name: to
+        schema:
+          type: string
+        description: 'End date YYYY-MM-DD (default: today)'
+      tags:
+      - analytics
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/analytics/targets/{target_id}/:
+    get:
+      operationId: analytics_targets_retrieve
+      summary: Metric history of one publication
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: target_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - analytics
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/analytics/targets/{target_id}/refresh/:
+    post:
+      operationId: analytics_targets_refresh_create
+      summary: Fetch fresh metrics for one publication now
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: target_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - analytics
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      summary: Your profile
+      tags:
+      - auth
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+    patch:
+      operationId: auth_me_partial_update
+      summary: Your profile
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUserRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/auth/register/:
+    post:
+      operationId: auth_register_create
+      description: Creates the user, an organization and a first workspace (or accepts
+        an invitation) and returns JWTs.
+      summary: Create an account
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/sso/discover/:
+    get:
+      operationId: auth_sso_discover_retrieve
+      description: Does this email sign in through an organization's identity provider?
+      summary: Find the SSO provider for an email
+      parameters:
+      - in: query
+        name: email
+        schema:
+          type: string
+        description: The address being signed in
+        required: true
+      - in: query
+        name: next
+        schema:
+          type: string
+        description: Path to open after sign-in
+      tags:
+      - auth
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/sso/exchange/:
+    post:
+      operationId: auth_sso_exchange_create
+      description: 'Body: {"ticket": "…"} (from /sso/complete?ticket=…). Single use.'
+      summary: Exchange an SSO ticket for tokens
+      tags:
+      - auth
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/token/:
+    post:
+      operationId: auth_token_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordTokenRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PasswordTokenRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PasswordTokenRequest'
+        required: true
+      responses:
+        '200':
+          description: No response body
+  /api/auth/token/refresh/:
+    post:
+      operationId: auth_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/auth/tokens/:
+    get:
+      operationId: auth_tokens_retrieve
+      description: 'POST {"name": "…", "expires_in_days": 90} returns the token **once**
+        in `token`.'
+      summary: List or create personal API tokens
+      tags:
+      - auth
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+    post:
+      operationId: auth_tokens_create
+      description: 'POST {"name": "…", "expires_in_days": 90} returns the token **once**
+        in `token`.'
+      summary: List or create personal API tokens
+      tags:
+      - auth
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/tokens/{token_id}/:
+    delete:
+      operationId: auth_tokens_destroy
+      summary: Revoke a personal API token
+      parameters:
+      - in: path
+        name: token_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - auth
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/billing/organizations/{org_id}/:
+    get:
+      operationId: billing_organizations_retrieve
+      summary: An organization's plan, subscription, limits and usage
+      parameters:
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - billing
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/billing/organizations/{org_id}/checkout/:
+    post:
+      operationId: billing_organizations_checkout_create
+      description: 'Body: {"plan": <id>}. Redirect the browser to the returned url.'
+      summary: Start a Stripe Checkout
+      parameters:
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - billing
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/billing/organizations/{org_id}/portal/:
+    post:
+      operationId: billing_organizations_portal_create
+      summary: Open the Stripe customer portal
+      parameters:
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - billing
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/billing/plans/:
+    get:
+      operationId: billing_plans_retrieve
+      summary: Plans you can subscribe to
+      tags:
+      - billing
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/calendar/:
+    get:
+      operationId: calendar_list
+      description: Everything scheduled or published in [start, end), one row per
+        channel publication.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - calendar
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CalendarItem'
+          description: ''
+  /api/campaigns/:
+    get:
+      operationId: campaigns_list
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - campaigns
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCampaignList'
+          description: ''
+    post:
+      operationId: campaigns_create
+      tags:
+      - campaigns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CampaignRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CampaignRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/campaigns/{id}/:
+    get:
+      operationId: campaigns_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this campaign.
+        required: true
+      tags:
+      - campaigns
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+          description: ''
+    put:
+      operationId: campaigns_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this campaign.
+        required: true
+      tags:
+      - campaigns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CampaignRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CampaignRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+          description: ''
+    patch:
+      operationId: campaigns_partial_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this campaign.
+        required: true
+      tags:
+      - campaigns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCampaignRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCampaignRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCampaignRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+          description: ''
+    delete:
+      operationId: campaigns_destroy
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this campaign.
+        required: true
+      tags:
+      - campaigns
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/channels/:
+    get:
+      operationId: channels_list
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: provider
+        schema:
+          type: string
+          enum:
+          - bluesky
+          - brevo
+          - discord
+          - drupal
+          - facebook
+          - ghost
+          - hugo
+          - instagram
+          - linkedin
+          - listmonk
+          - mastodon
+          - medium
+          - qq
+          - telegram
+          - threads
+          - webhook
+          - wechat
+          - whatsapp
+          - wordpress
+          - x
+          - youtube
+        description: |-
+          * `x` - X
+          * `bluesky` - Bluesky
+          * `mastodon` - Mastodon
+          * `linkedin` - LinkedIn
+          * `facebook` - Facebook
+          * `instagram` - Instagram
+          * `telegram` - Telegram
+          * `whatsapp` - WhatsApp
+          * `wechat` - WeChat
+          * `qq` - QQ
+          * `threads` - Threads
+          * `youtube` - YouTube
+          * `discord` - Discord
+          * `ghost` - Ghost
+          * `brevo` - Brevo
+          * `listmonk` - Listmonk
+          * `webhook` - Webhook
+          * `wordpress` - WordPress
+          * `drupal` - Drupal
+          * `medium` - Medium
+          * `hugo` - Hugo (git)
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - active
+          - disabled
+          - needs_reauth
+        description: |-
+          * `active` - Active
+          * `needs_reauth` - Needs re-authentication
+          * `disabled` - Disabled
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedChannelList'
+          description: ''
+  /api/channels/{id}/:
+    get:
+      operationId: channels_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+    put:
+      operationId: channels_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+    patch:
+      operationId: channels_partial_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedChannelRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+    delete:
+      operationId: channels_destroy
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/channels/{id}/relevance/:
+    post:
+      operationId: channels_relevance_create
+      description: Mark the channel as relevant (shown first, preselected) for this
+        workspace, or not.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+  /api/channels/{id}/rotate-secret/:
+    post:
+      operationId: channels_rotate_secret_create
+      description: New signing secret for a webhook channel; the old one stops working
+        immediately.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+  /api/channels/{id}/subscribers/:
+    get:
+      operationId: channels_subscribers_retrieve
+      description: |-
+        WhatsApp broadcast list. POST {address, name, consent: true}, or {lines: "phone,name
+        …", consent: true}.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+    post:
+      operationId: channels_subscribers_create
+      description: |-
+        WhatsApp broadcast list. POST {address, name, consent: true}, or {lines: "phone,name
+        …", consent: true}.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+  /api/channels/{id}/subscribers/{subscriber_id}/:
+    delete:
+      operationId: channels_subscribers_destroy
+      description: Opt someone out (kept for the record, never messaged again).
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      - in: path
+        name: subscriber_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/channels/{id}/sync/:
+    post:
+      operationId: channels_sync_create
+      description: Re-validate credentials and refresh the audience size.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+  /api/channels/connect/:
+    post:
+      operationId: channels_connect_create
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/channels/connections/{request_id}/:
+    get:
+      operationId: channels_connections_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: request_id
+        schema:
+          type: string
+          pattern: ^[0-9a-f-]+$
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+    post:
+      operationId: channels_connections_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: request_id
+        schema:
+          type: string
+          pattern: ^[0-9a-f-]+$
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+  /api/insights/adapt/:
+    post:
+      operationId: insights_adapt_create
+      summary: Adapt a text to each network with AI
+      tags:
+      - insights
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdaptRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdaptRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdaptRequestRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/insights/best-times/:
+    get:
+      operationId: insights_best_times_retrieve
+      description: 7×24 scores (Monday first, local hours, 0–100) learned from each
+        channel's engagement.
+      summary: Best times to post per channel
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: query
+        name: channels
+        schema:
+          type: string
+        description: Comma-separated channel ids
+      tags:
+      - insights
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/insights/best-times/rebuild/:
+    post:
+      operationId: insights_best_times_rebuild_create
+      summary: Recompute best times now
+      tags:
+      - insights
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/insights/plan/:
+    post:
+      operationId: insights_plan_create
+      summary: Plan a campaign with AI
+      tags:
+      - insights
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignPlanRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CampaignPlanRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CampaignPlanRequestRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/insights/suggest/:
+    post:
+      operationId: insights_suggest_create
+      summary: Suggest a publishing time per channel
+      tags:
+      - insights
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestTimesRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuggestTimesRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuggestTimesRequestRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/invitations/:
+    get:
+      operationId: invitations_list
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - invitations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedInvitationList'
+          description: ''
+    post:
+      operationId: invitations_create
+      tags:
+      - invitations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InvitationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InvitationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/invitations/{id}/:
+    delete:
+      operationId: invitations_destroy
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this invitation.
+        required: true
+      tags:
+      - invitations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/invitations/accept/:
+    post:
+      operationId: invitations_accept_create
+      description: 'Body: {"token": "…"}. Returns the workspace you joined.'
+      summary: Accept an invitation
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/media/:
+    get:
+      operationId: media_list
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - media
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMediaAssetList'
+          description: ''
+    post:
+      operationId: media_create
+      tags:
+      - media
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MediaAssetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MediaAssetRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaAssetRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaAsset'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/media/{id}/:
+    get:
+      operationId: media_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this media asset.
+        required: true
+      tags:
+      - media
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaAsset'
+          description: ''
+    put:
+      operationId: media_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this media asset.
+        required: true
+      tags:
+      - media
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MediaAssetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MediaAssetRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaAssetRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaAsset'
+          description: ''
+    patch:
+      operationId: media_partial_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this media asset.
+        required: true
+      tags:
+      - media
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedMediaAssetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedMediaAssetRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedMediaAssetRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaAsset'
+          description: ''
+    delete:
+      operationId: media_destroy
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this media asset.
+        required: true
+      tags:
+      - media
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/members/:
+    get:
+      operationId: members_list
+      description: Direct workspace members. Org owners/admins have access without
+        being listed here.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - members
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMembershipList'
+          description: ''
+    post:
+      operationId: members_create
+      description: Direct workspace members. Org owners/admins have access without
+        being listed here.
+      tags:
+      - members
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Membership'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/members/{id}/:
+    put:
+      operationId: members_update
+      description: Direct workspace members. Org owners/admins have access without
+        being listed here.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this membership.
+        required: true
+      tags:
+      - members
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Membership'
+          description: ''
+    patch:
+      operationId: members_partial_update
+      description: Direct workspace members. Org owners/admins have access without
+        being listed here.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this membership.
+        required: true
+      tags:
+      - members
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedMembershipRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedMembershipRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedMembershipRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Membership'
+          description: ''
+    delete:
+      operationId: members_destroy
+      description: Direct workspace members. Org owners/admins have access without
+        being listed here.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this membership.
+        required: true
+      tags:
+      - members
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/organizations/:
+    get:
+      operationId: organizations_list
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrganizationList'
+          description: ''
+    post:
+      operationId: organizations_create
+      description: Any signed-in user can start another organization (unless a superadmin
+        turned it off).
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /api/organizations/{org_id}/sso/:
+    get:
+      operationId: organizations_sso_retrieve
+      description: GET for owners and admins; PUT for owners. client_secret is write-only.
+      summary: Single sign-on settings
+      parameters:
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+    put:
+      operationId: organizations_sso_update
+      description: GET for owners and admins; PUT for owners. client_secret is write-only.
+      summary: Single sign-on settings
+      parameters:
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/organizations/{org_id}/sso/domains/:
+    post:
+      operationId: organizations_sso_domains_create
+      description: 'Body: {"domain": "acme.com"}. Verify it with the returned DNS
+        TXT record.'
+      summary: Claim an email domain for SSO
+      parameters:
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/organizations/{org_id}/sso/domains/{domain_id}/:
+    delete:
+      operationId: organizations_sso_domains_destroy
+      summary: Remove a claimed domain
+      parameters:
+      - in: path
+        name: domain_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/organizations/{org_id}/sso/domains/{domain_id}/verify/:
+    post:
+      operationId: organizations_sso_domains_verify_create
+      summary: Verify a claimed domain via DNS
+      parameters:
+      - in: path
+        name: domain_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: org_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/organizations/{id}/:
+    get:
+      operationId: organizations_retrieve
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+    put:
+      operationId: organizations_update
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+    patch:
+      operationId: organizations_partial_update
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /api/organizations/{id}/channels/:
+    get:
+      operationId: organizations_channels_retrieve
+      description: Every channel of the organization with the workspaces it is shared
+        with.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /api/organizations/{id}/channels/{channel_id}/:
+    patch:
+      operationId: organizations_channels_partial_update
+      description: 'Set the workspaces the channel is relevant for (PATCH {workspaces:
+        [ids]}) or disconnect it (DELETE).'
+      parameters:
+      - in: path
+        name: channel_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+    delete:
+      operationId: organizations_channels_destroy
+      description: 'Set the workspaces the channel is relevant for (PATCH {workspaces:
+        [ids]}) or disconnect it (DELETE).'
+      parameters:
+      - in: path
+        name: channel_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/organizations/{id}/invitations/:
+    get:
+      operationId: organizations_invitations_retrieve
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+    post:
+      operationId: organizations_invitations_create
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /api/organizations/{id}/invitations/{invitation_id}/:
+    delete:
+      operationId: organizations_invitations_destroy
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      - in: path
+        name: invitation_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/organizations/{id}/leave/:
+    post:
+      operationId: organizations_leave_create
+      description: 'Leave an organization: drops the org role and every workspace
+        membership in it.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrganizationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /api/organizations/{id}/members/:
+    get:
+      operationId: organizations_members_retrieve
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /api/organizations/{id}/members/{member_id}/:
+    patch:
+      operationId: organizations_members_partial_update
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      - in: path
+        name: member_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+    delete:
+      operationId: organizations_members_destroy
+      description: Organizations the user belongs to (directly or through one of its
+        workspaces).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      - in: path
+        name: member_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - organizations
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/platform/ai-usage/:
+    get:
+      operationId: platform_ai_usage_retrieve
+      summary: AI usage and cost per organization
+      parameters:
+      - in: query
+        name: month
+        schema:
+          type: string
+        description: YYYY-MM, default current month
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/platform/health/:
+    get:
+      operationId: platform_health_retrieve
+      description: Is the scheduler keeping up, and what is failing?
+      summary: Publishing health
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/platform/organizations/:
+    get:
+      operationId: platform_organizations_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - active
+          - suspended
+        description: |-
+          * `active` - Active
+          * `suspended` - Suspended
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPlatformOrganizationList'
+          description: ''
+    post:
+      operationId: platform_organizations_create
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformOrganization'
+          description: ''
+  /api/platform/organizations/{id}/:
+    get:
+      operationId: platform_organizations_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformOrganization'
+          description: ''
+    put:
+      operationId: platform_organizations_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformOrganization'
+          description: ''
+    patch:
+      operationId: platform_organizations_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformOrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformOrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformOrganizationRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformOrganization'
+          description: ''
+    delete:
+      operationId: platform_organizations_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/platform/organizations/{id}/detail/:
+    get:
+      operationId: platform_organizations_detail_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformOrganization'
+          description: ''
+  /api/platform/organizations/{id}/workspaces/:
+    post:
+      operationId: platform_organizations_workspaces_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlatformOrganizationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformOrganization'
+          description: ''
+  /api/platform/overview/:
+    get:
+      operationId: platform_overview_retrieve
+      summary: Installation overview
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/platform/plans/:
+    get:
+      operationId: platform_plans_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Plan'
+          description: ''
+    post:
+      operationId: platform_plans_create
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+  /api/platform/plans/{id}/:
+    get:
+      operationId: platform_plans_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    put:
+      operationId: platform_plans_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    patch:
+      operationId: platform_plans_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlanRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPlanRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPlanRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    delete:
+      operationId: platform_plans_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/platform/plans/{id}/stripe-price/:
+    post:
+      operationId: platform_plans_stripe_price_create
+      description: Create the Stripe product and recurring price for this plan.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+  /api/platform/public/:
+    get:
+      operationId: platform_public_retrieve
+      description: Name, announcement banner and sign-up rules. No authentication
+        needed.
+      summary: Public installation info
+      tags:
+      - auth
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/platform/settings/:
+    get:
+      operationId: platform_settings_retrieve
+      description: Values here override the environment; secrets are write-only.
+      summary: Installation settings
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+    patch:
+      operationId: platform_settings_partial_update
+      description: Values here override the environment; secrets are write-only.
+      summary: Installation settings
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/platform/settings/test-ai/:
+    post:
+      operationId: platform_settings_test_ai_create
+      description: Check the configured provider, key and model without generating
+        anything.
+      summary: Test the AI provider connection
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/platform/users/:
+    get:
+      operationId: platform_users_list
+      parameters:
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: is_superuser
+        schema:
+          type: boolean
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPlatformUserList'
+          description: ''
+  /api/platform/users/{id}/:
+    get:
+      operationId: platform_users_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - platform
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUser'
+          description: ''
+    put:
+      operationId: platform_users_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlatformUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlatformUserRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUser'
+          description: ''
+    patch:
+      operationId: platform_users_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformUserRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUser'
+          description: ''
+  /api/platform/users/{id}/set-password/:
+    post:
+      operationId: platform_users_set_password_create
+      description: Generate a temporary password, returned once. Share it with the
+        user out of band.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformUserRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PlatformUserRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PlatformUserRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUser'
+          description: ''
+  /api/posts/:
+    get:
+      operationId: posts_list
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: query
+        name: campaign
+        schema:
+          type: integer
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPostList'
+          description: ''
+    post:
+      operationId: posts_create
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/posts/{id}/:
+    get:
+      operationId: posts_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+    put:
+      operationId: posts_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+    patch:
+      operationId: posts_partial_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+    delete:
+      operationId: posts_destroy
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/posts/{id}/approve/:
+    post:
+      operationId: posts_approve_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/duplicate/:
+    post:
+      operationId: posts_duplicate_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/request-changes/:
+    post:
+      operationId: posts_request_changes_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/retry/:
+    post:
+      operationId: posts_retry_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/reviews/:
+    get:
+      operationId: posts_reviews_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/schedule/:
+    post:
+      operationId: posts_schedule_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/unschedule/:
+    post:
+      operationId: posts_unschedule_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/validate/:
+    get:
+      operationId: posts_validate_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/providers/:
+    get:
+      operationId: providers_retrieve
+      description: Capabilities (character limits, media, first comment, metrics)
+        and the fields needed to connect each provider.
+      summary: Supported networks and sites
+      tags:
+      - providers
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/slots/:
+    get:
+      operationId: slots_list
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: query
+        name: active
+        schema:
+          type: boolean
+      - in: query
+        name: channel
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: team
+        schema:
+          type: integer
+      - in: query
+        name: weekday
+        schema:
+          type: integer
+      tags:
+      - slots
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+          description: ''
+    post:
+      operationId: slots_create
+      tags:
+      - slots
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Slot'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/slots/{id}/:
+    get:
+      operationId: slots_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this posting slot.
+        required: true
+      tags:
+      - slots
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Slot'
+          description: ''
+    put:
+      operationId: slots_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this posting slot.
+        required: true
+      tags:
+      - slots
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Slot'
+          description: ''
+    patch:
+      operationId: slots_partial_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this posting slot.
+        required: true
+      tags:
+      - slots
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSlotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSlotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSlotRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Slot'
+          description: ''
+    delete:
+      operationId: slots_destroy
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this posting slot.
+        required: true
+      tags:
+      - slots
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/slots/preset/:
+    post:
+      operationId: slots_preset_create
+      description: Replace the workspace-wide queue with a sensible starting set.
+      tags:
+      - slots
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Slot'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/targets/{id}/:
+    get:
+      operationId: targets_retrieve
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
+    put:
+      operationId: targets_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
+    patch:
+      operationId: targets_partial_update
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTargetRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
+  /api/targets/{id}/cancel/:
+    post:
+      operationId: targets_cancel_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
+  /api/targets/{id}/delete-remote/:
+    post:
+      operationId: targets_delete_remote_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
+  /api/targets/{id}/reschedule/:
+    post:
+      operationId: targets_reschedule_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
+  /api/teams/:
+    get:
+      operationId: teams_list
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - teams
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Team'
+          description: ''
+    post:
+      operationId: teams_create
+      description: Everyone in the workspace can list teams; only admins change them.
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+  /api/teams/{id}/:
+    get:
+      operationId: teams_retrieve
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      tags:
+      - teams
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+          description: ''
+    put:
+      operationId: teams_update
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+          description: ''
+    patch:
+      operationId: teams_partial_update
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+          description: ''
+    delete:
+      operationId: teams_destroy
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      tags:
+      - teams
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/teams/{id}/members/:
+    post:
+      operationId: teams_members_create
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TeamRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+          description: ''
+  /api/teams/{id}/members/{member_id}/:
+    patch:
+      operationId: teams_members_partial_update
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      - in: path
+        name: member_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+          description: ''
+    delete:
+      operationId: teams_members_destroy
+      description: Everyone in the workspace can list teams; only admins change them.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this team.
+        required: true
+      - in: path
+        name: member_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - teams
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/workspaces/:
+    get:
+      operationId: workspaces_list
+      description: Workspaces the user can open, across organizations. Not tenant-scoped
+        by header.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - workspaces
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedWorkspaceList'
+          description: ''
+    post:
+      operationId: workspaces_create
+      description: Workspaces the user can open, across organizations. Not tenant-scoped
+        by header.
+      tags:
+      - workspaces
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WorkspaceRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WorkspaceRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+          description: ''
+  /api/workspaces/{id}/:
+    get:
+      operationId: workspaces_retrieve
+      description: Workspaces the user can open, across organizations. Not tenant-scoped
+        by header.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this workspace.
+        required: true
+      tags:
+      - workspaces
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+          description: ''
+    put:
+      operationId: workspaces_update
+      description: Workspaces the user can open, across organizations. Not tenant-scoped
+        by header.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this workspace.
+        required: true
+      tags:
+      - workspaces
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WorkspaceRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WorkspaceRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+          description: ''
+    patch:
+      operationId: workspaces_partial_update
+      description: Workspaces the user can open, across organizations. Not tenant-scoped
+        by header.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this workspace.
+        required: true
+      tags:
+      - workspaces
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedWorkspaceRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedWorkspaceRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedWorkspaceRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+          description: ''
+    delete:
+      operationId: workspaces_destroy
+      description: Workspaces the user can open, across organizations. Not tenant-scoped
+        by header.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this workspace.
+        required: true
+      tags:
+      - workspaces
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+components:
+  schemas:
+    AdaptRequestRequest:
+      type: object
+      properties:
+        channels:
+          type: array
+          items:
+            type: integer
+        body:
+          type: string
+          minLength: 1
+        title:
+          type: string
+        instructions:
+          type: string
+      required:
+      - body
+      - channels
+    ApprovalStatusEnum:
+      enum:
+      - pending
+      - approved
+      - changes_requested
+      type: string
+      description: |-
+        * `` - Not required
+        * `pending` - Waiting for review
+        * `approved` - Approved
+        * `changes_requested` - Changes requested
+    BlankEnum:
+      enum:
+      - ''
+    CalendarItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        post_id:
+          type: integer
+        post_title:
+          type: string
+        excerpt:
+          type: string
+          readOnly: true
+        channel:
+          type: integer
+        channel_name:
+          type: string
+        provider:
+          type: string
+        avatar_url:
+          type: string
+        status:
+          $ref: '#/components/schemas/TargetStatusEnum'
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        external_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 1000
+          - type: string
+            maxLength: 0
+        schedule_reason:
+          type: string
+          maxLength: 500
+        campaign:
+          type: integer
+          nullable: true
+        thumbnail:
+          type: string
+          nullable: true
+          readOnly: true
+        metrics: {}
+      required:
+      - avatar_url
+      - campaign
+      - channel
+      - channel_name
+      - excerpt
+      - id
+      - post_id
+      - post_title
+      - provider
+      - thumbnail
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 200
+        brief:
+          type: string
+        starts_on:
+          type: string
+          format: date
+        ends_on:
+          type: string
+          format: date
+        color:
+          type: string
+          maxLength: 9
+        post_count:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - ends_on
+      - id
+      - name
+      - post_count
+      - starts_on
+    CampaignPlanRequestRequest:
+      type: object
+      properties:
+        channels:
+          type: array
+          items:
+            type: integer
+        brief:
+          type: string
+          minLength: 1
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        posts_per_week:
+          type: integer
+          maximum: 50
+          minimum: 1
+          default: 3
+        language:
+          type: string
+        campaign:
+          type: integer
+          nullable: true
+      required:
+      - brief
+      - channels
+      - end
+      - start
+    CampaignRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        brief:
+          type: string
+        starts_on:
+          type: string
+          format: date
+        ends_on:
+          type: string
+          format: date
+        color:
+          type: string
+          minLength: 1
+          maxLength: 9
+      required:
+      - ends_on
+      - name
+      - starts_on
+    Channel:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        provider:
+          allOf:
+          - $ref: '#/components/schemas/ProviderEnum'
+          readOnly: true
+        provider_label:
+          type: string
+          readOnly: true
+        external_id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        handle:
+          type: string
+          readOnly: true
+        avatar_url:
+          type: string
+          format: uri
+          readOnly: true
+        profile_url:
+          type: string
+          format: uri
+          readOnly: true
+        base_url:
+          type: string
+          format: uri
+          readOnly: true
+        config: {}
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ChannelStatusEnum'
+          readOnly: true
+        last_error:
+          type: string
+          readOnly: true
+        followers_count:
+          type: integer
+          readOnly: true
+          nullable: true
+        color:
+          type: string
+          maxLength: 9
+        token_expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        teams:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        organization:
+          type: integer
+          readOnly: true
+        workspaces:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        shared_count:
+          type: integer
+          readOnly: true
+        relevant:
+          type: boolean
+          description: Relevant for the workspace of the request (shown first and
+            preselected there).
+          readOnly: true
+        setup:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          description: Webhook details the user must configure on the platform side.
+          readOnly: true
+        approval_required:
+          type: boolean
+          description: Whether the current user's posts to this channel go through
+            review.
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approval_required
+      - avatar_url
+      - base_url
+      - created_at
+      - external_id
+      - followers_count
+      - handle
+      - id
+      - last_error
+      - name
+      - organization
+      - profile_url
+      - provider
+      - provider_label
+      - relevant
+      - setup
+      - shared_count
+      - status
+      - teams
+      - token_expires_at
+      - workspaces
+    ChannelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        config: {}
+        color:
+          type: string
+          maxLength: 9
+      required:
+      - name
+    ChannelStatusEnum:
+      enum:
+      - active
+      - needs_reauth
+      - disabled
+      type: string
+      description: |-
+        * `active` - Active
+        * `needs_reauth` - Needs re-authentication
+        * `disabled` - Disabled
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        role:
+          $ref: '#/components/schemas/WorkspaceRoleEnum'
+        org_role:
+          oneOf:
+          - $ref: '#/components/schemas/OrgRoleEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        workspace:
+          type: integer
+          readOnly: true
+          nullable: true
+        workspace_name:
+          type: string
+          readOnly: true
+        token:
+          type: string
+          readOnly: true
+        accepted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - accepted_at
+      - created_at
+      - email
+      - id
+      - token
+      - workspace
+      - workspace_name
+    InvitationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        role:
+          $ref: '#/components/schemas/WorkspaceRoleEnum'
+        org_role:
+          oneOf:
+          - $ref: '#/components/schemas/OrgRoleEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+      required:
+      - email
+    MediaAsset:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        url:
+          type: string
+          readOnly: true
+        original_name:
+          type: string
+          readOnly: true
+        mime:
+          type: string
+          readOnly: true
+        size:
+          type: integer
+          readOnly: true
+        width:
+          type: integer
+          readOnly: true
+          nullable: true
+        height:
+          type: integer
+          readOnly: true
+          nullable: true
+        alt_text:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - height
+      - id
+      - mime
+      - original_name
+      - size
+      - url
+      - width
+    MediaAssetRequest:
+      type: object
+      properties:
+        alt_text:
+          type: string
+    Membership:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          allOf:
+          - $ref: '#/components/schemas/User'
+          readOnly: true
+        role:
+          $ref: '#/components/schemas/WorkspaceRoleEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - user
+    MembershipRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          writeOnly: true
+          minLength: 1
+        role:
+          $ref: '#/components/schemas/WorkspaceRoleEnum'
+    OrgRoleEnum:
+      enum:
+      - owner
+      - admin
+      - member
+      type: string
+      description: |-
+        * `owner` - Owner
+        * `admin` - Admin
+        * `member` - Member
+    OrgStatusEnum:
+      enum:
+      - active
+      - suspended
+      type: string
+      description: |-
+        * `active` - Active
+        * `suspended` - Suspended
+    Organization:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 160
+        slug:
+          type: string
+          readOnly: true
+          pattern: ^[-a-zA-Z0-9_]+$
+        status:
+          allOf:
+          - $ref: '#/components/schemas/OrgStatusEnum'
+          readOnly: true
+        role:
+          type: string
+          nullable: true
+          readOnly: true
+        max_workspaces:
+          type: integer
+          readOnly: true
+          nullable: true
+        max_channels:
+          type: integer
+          readOnly: true
+          nullable: true
+        max_members:
+          type: integer
+          readOnly: true
+          nullable: true
+        ai_monthly_tokens:
+          type: integer
+          readOnly: true
+          nullable: true
+        workspace_count:
+          type: integer
+          readOnly: true
+        usage:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - ai_monthly_tokens
+      - created_at
+      - id
+      - max_channels
+      - max_members
+      - max_workspaces
+      - name
+      - role
+      - slug
+      - status
+      - usage
+      - workspace_count
+    OrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+      required:
+      - name
+    PaginatedCampaignList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Campaign'
+    PaginatedChannelList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Channel'
+    PaginatedInvitationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invitation'
+    PaginatedMediaAssetList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaAsset'
+    PaginatedMembershipList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Membership'
+    PaginatedOrganizationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Organization'
+    PaginatedPlatformOrganizationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformOrganization'
+    PaginatedPlatformUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformUser'
+    PaginatedPostList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Post'
+    PaginatedWorkspaceList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Workspace'
+    PasswordTokenRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          writeOnly: true
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - email
+      - password
+    PatchedCampaignRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        brief:
+          type: string
+        starts_on:
+          type: string
+          format: date
+        ends_on:
+          type: string
+          format: date
+        color:
+          type: string
+          minLength: 1
+          maxLength: 9
+    PatchedChannelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        config: {}
+        color:
+          type: string
+          maxLength: 9
+    PatchedMediaAssetRequest:
+      type: object
+      properties:
+        alt_text:
+          type: string
+    PatchedMembershipRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          writeOnly: true
+          minLength: 1
+        role:
+          $ref: '#/components/schemas/WorkspaceRoleEnum'
+    PatchedOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+    PatchedPlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: ^[-a-zA-Z0-9_]+$
+        description:
+          type: string
+        price_label:
+          type: string
+          maxLength: 60
+        stripe_price_id:
+          type: string
+          maxLength: 120
+        max_workspaces:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_channels:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_members:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        ai_monthly_tokens:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        is_public:
+          type: boolean
+        active:
+          type: boolean
+        sort:
+          type: integer
+          maximum: 32767
+          minimum: 0
+    PatchedPlatformOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        status:
+          $ref: '#/components/schemas/OrgStatusEnum'
+        max_workspaces:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_channels:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_members:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        ai_monthly_tokens:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        notes:
+          type: string
+        owner_email:
+          type: string
+          format: email
+          writeOnly: true
+          minLength: 1
+    PatchedPlatformUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        is_active:
+          type: boolean
+        is_superadmin:
+          type: boolean
+    PatchedPostRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 300
+        body:
+          type: string
+        link:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 1000
+          - type: string
+            maxLength: 0
+        tags: {}
+        campaign:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+        media_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/TargetRequest'
+    PatchedSlotRequest:
+      type: object
+      properties:
+        channel:
+          type: integer
+          nullable: true
+        team:
+          type: integer
+          nullable: true
+        weekday:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        time:
+          type: string
+          format: time
+        active:
+          type: boolean
+    PatchedTargetRequest:
+      type: object
+      properties:
+        channel:
+          type: integer
+        body:
+          type: string
+        title:
+          type: string
+          maxLength: 300
+        media_ids:
+          nullable: true
+        options: {}
+    PatchedTeamRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+        color:
+          type: string
+          minLength: 1
+          maxLength: 9
+        requires_approval:
+          type: boolean
+        channels:
+          type: array
+          items:
+            type: integer
+    PatchedUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+    PatchedWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        min_gap_minutes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        ai_enabled:
+          type: boolean
+        organization:
+          type: integer
+        archived:
+          type: boolean
+          writeOnly: true
+    Plan:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 80
+        slug:
+          type: string
+          maxLength: 80
+          pattern: ^[-a-zA-Z0-9_]+$
+        description:
+          type: string
+        price_label:
+          type: string
+          maxLength: 60
+        stripe_price_id:
+          type: string
+          maxLength: 120
+        max_workspaces:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_channels:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_members:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        ai_monthly_tokens:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        is_public:
+          type: boolean
+        active:
+          type: boolean
+        sort:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - name
+      - slug
+    PlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: ^[-a-zA-Z0-9_]+$
+        description:
+          type: string
+        price_label:
+          type: string
+          maxLength: 60
+        stripe_price_id:
+          type: string
+          maxLength: 120
+        max_workspaces:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_channels:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_members:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        ai_monthly_tokens:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        is_public:
+          type: boolean
+        active:
+          type: boolean
+        sort:
+          type: integer
+          maximum: 32767
+          minimum: 0
+      required:
+      - name
+      - slug
+    PlatformOrganization:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 160
+        slug:
+          type: string
+          readOnly: true
+          pattern: ^[-a-zA-Z0-9_]+$
+        status:
+          $ref: '#/components/schemas/OrgStatusEnum'
+        max_workspaces:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_channels:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_members:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        ai_monthly_tokens:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        notes:
+          type: string
+        usage:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        owners:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        subscription:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - name
+      - owners
+      - slug
+      - subscription
+      - usage
+    PlatformOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        status:
+          $ref: '#/components/schemas/OrgStatusEnum'
+        max_workspaces:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_channels:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        max_members:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        ai_monthly_tokens:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+        notes:
+          type: string
+        owner_email:
+          type: string
+          format: email
+          writeOnly: true
+          minLength: 1
+      required:
+      - name
+    PlatformUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        is_active:
+          type: boolean
+        is_superadmin:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        last_login:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        organizations:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+      required:
+      - date_joined
+      - email
+      - id
+      - last_login
+      - organizations
+    PlatformUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        is_active:
+          type: boolean
+        is_superadmin:
+          type: boolean
+    Post:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 300
+        body:
+          type: string
+        link:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 1000
+          - type: string
+            maxLength: 0
+        tags: {}
+        campaign:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PostStatusEnum'
+          readOnly: true
+        schedule_mode:
+          allOf:
+          - $ref: '#/components/schemas/ScheduleModeEnum'
+          readOnly: true
+        window_start:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        window_end:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        media:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaAsset'
+          readOnly: true
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/Target'
+        author_name:
+          type: string
+          readOnly: true
+        approval_status:
+          readOnly: true
+          oneOf:
+          - $ref: '#/components/schemas/ApprovalStatusEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        submitted_by_name:
+          type: string
+          nullable: true
+          readOnly: true
+        submitted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        reviewed_by_name:
+          type: string
+          nullable: true
+          readOnly: true
+        reviewed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        needs_approval:
+          type: boolean
+          readOnly: true
+        can_review:
+          type: boolean
+          readOnly: true
+        hidden_targets:
+          type: integer
+          description: Publications on channels this user cannot see (kept untouched
+            on save).
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approval_status
+      - author_name
+      - can_review
+      - created_at
+      - hidden_targets
+      - id
+      - media
+      - needs_approval
+      - reviewed_at
+      - reviewed_by_name
+      - schedule_mode
+      - status
+      - submitted_at
+      - submitted_by_name
+      - updated_at
+      - window_end
+      - window_start
+    PostRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 300
+        body:
+          type: string
+        link:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 1000
+          - type: string
+            maxLength: 0
+        tags: {}
+        campaign:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+        media_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/TargetRequest'
+    PostStatusEnum:
+      enum:
+      - draft
+      - scheduled
+      - publishing
+      - published
+      - partial
+      - failed
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `scheduled` - Scheduled
+        * `publishing` - Publishing
+        * `published` - Published
+        * `partial` - Partially published
+        * `failed` - Failed
+    ProviderEnum:
+      enum:
+      - x
+      - bluesky
+      - mastodon
+      - linkedin
+      - facebook
+      - instagram
+      - telegram
+      - whatsapp
+      - wechat
+      - qq
+      - threads
+      - youtube
+      - discord
+      - ghost
+      - brevo
+      - listmonk
+      - webhook
+      - wordpress
+      - drupal
+      - medium
+      - hugo
+      type: string
+      description: |-
+        * `x` - X
+        * `bluesky` - Bluesky
+        * `mastodon` - Mastodon
+        * `linkedin` - LinkedIn
+        * `facebook` - Facebook
+        * `instagram` - Instagram
+        * `telegram` - Telegram
+        * `whatsapp` - WhatsApp
+        * `wechat` - WeChat
+        * `qq` - QQ
+        * `threads` - Threads
+        * `youtube` - YouTube
+        * `discord` - Discord
+        * `ghost` - Ghost
+        * `brevo` - Brevo
+        * `listmonk` - Listmonk
+        * `webhook` - Webhook
+        * `wordpress` - WordPress
+        * `drupal` - Drupal
+        * `medium` - Medium
+        * `hugo` - Hugo (git)
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+        name:
+          type: string
+        organization_name:
+          type: string
+        workspace_name:
+          type: string
+        timezone:
+          type: string
+          minLength: 1
+          default: UTC
+        invitation:
+          type: string
+      required:
+      - email
+      - password
+    ScheduleModeEnum:
+      enum:
+      - exact
+      - queue
+      - best_time
+      - now
+      type: string
+      description: |-
+        * `exact` - At a specific time
+        * `queue` - Next queue slot
+        * `best_time` - Best time
+        * `now` - Now
+    Slot:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        channel:
+          type: integer
+          nullable: true
+        team:
+          type: integer
+          nullable: true
+        weekday:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        time:
+          type: string
+          format: time
+        active:
+          type: boolean
+      required:
+      - id
+      - time
+      - weekday
+    SlotRequest:
+      type: object
+      properties:
+        channel:
+          type: integer
+          nullable: true
+        team:
+          type: integer
+          nullable: true
+        weekday:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        time:
+          type: string
+          format: time
+        active:
+          type: boolean
+      required:
+      - time
+      - weekday
+    SuggestTimesRequestRequest:
+      type: object
+      properties:
+        channels:
+          type: array
+          items:
+            type: integer
+        post:
+          type: integer
+        body:
+          type: string
+        title:
+          type: string
+        window_start:
+          type: string
+          format: date-time
+          nullable: true
+        window_end:
+          type: string
+          format: date-time
+          nullable: true
+        campaign:
+          type: integer
+          nullable: true
+        use_ai:
+          type: boolean
+          default: true
+      required:
+      - channels
+    Target:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        channel:
+          type: integer
+        channel_detail:
+          allOf:
+          - $ref: '#/components/schemas/Channel'
+          readOnly: true
+        body:
+          type: string
+        title:
+          type: string
+          maxLength: 300
+        media_ids:
+          nullable: true
+        options: {}
+        status:
+          allOf:
+          - $ref: '#/components/schemas/TargetStatusEnum'
+          readOnly: true
+        scheduled_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        schedule_reason:
+          type: string
+          readOnly: true
+        attempts:
+          type: integer
+          readOnly: true
+        next_attempt_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        external_id:
+          type: string
+          readOnly: true
+        external_url:
+          type: string
+          format: uri
+          readOnly: true
+        last_error:
+          type: string
+          readOnly: true
+        extra:
+          readOnly: true
+        metrics:
+          readOnly: true
+        metrics_updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - attempts
+      - channel
+      - channel_detail
+      - external_id
+      - external_url
+      - extra
+      - id
+      - last_error
+      - metrics
+      - metrics_updated_at
+      - next_attempt_at
+      - published_at
+      - schedule_reason
+      - scheduled_at
+      - status
+    TargetRequest:
+      type: object
+      properties:
+        channel:
+          type: integer
+        body:
+          type: string
+        title:
+          type: string
+          maxLength: 300
+        media_ids:
+          nullable: true
+        options: {}
+      required:
+      - channel
+    TargetStatusEnum:
+      enum:
+      - draft
+      - scheduled
+      - queued
+      - publishing
+      - published
+      - failed
+      - cancelled
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `scheduled` - Scheduled
+        * `queued` - Queued
+        * `publishing` - Publishing
+        * `published` - Published
+        * `failed` - Failed
+        * `cancelled` - Cancelled
+    Team:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+        color:
+          type: string
+          maxLength: 9
+        requires_approval:
+          type: boolean
+        channels:
+          type: array
+          items:
+            type: integer
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamMember'
+          readOnly: true
+        my_role:
+          type: string
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - members
+      - my_role
+      - name
+    TeamMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user_id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        role:
+          $ref: '#/components/schemas/TeamMemberRoleEnum'
+      required:
+      - email
+      - id
+      - name
+      - user_id
+    TeamMemberRequest:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/TeamMemberRoleEnum'
+    TeamMemberRoleEnum:
+      enum:
+      - member
+      - reviewer
+      type: string
+      description: |-
+        * `member` - Member
+        * `reviewer` - Reviewer
+    TeamRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+        color:
+          type: string
+          minLength: 1
+          maxLength: 9
+        requires_approval:
+          type: boolean
+        channels:
+          type: array
+          items:
+            type: integer
+      required:
+      - name
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    TokenRefreshRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          minLength: 1
+      required:
+      - refresh
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        timezone:
+          type: string
+          maxLength: 64
+        is_superadmin:
+          type: boolean
+          readOnly: true
+      required:
+      - email
+      - id
+      - is_superadmin
+    UserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+    Workspace:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 120
+        slug:
+          type: string
+          readOnly: true
+          pattern: ^[-a-zA-Z0-9_]+$
+        timezone:
+          type: string
+          maxLength: 64
+        min_gap_minutes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        ai_enabled:
+          type: boolean
+        ai_available:
+          type: boolean
+          description: Server switch and, when the org has an AI allowance, whether
+            any is left this month.
+          readOnly: true
+        role:
+          type: string
+          nullable: true
+          readOnly: true
+        organization:
+          type: integer
+        organization_name:
+          type: string
+          readOnly: true
+        organization_slug:
+          type: string
+          readOnly: true
+        organization_role:
+          type: string
+          nullable: true
+          readOnly: true
+        is_archived:
+          type: boolean
+          readOnly: true
+        archived_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - ai_available
+      - archived_at
+      - created_at
+      - id
+      - is_archived
+      - name
+      - organization_name
+      - organization_role
+      - organization_slug
+      - role
+      - slug
+    WorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+        min_gap_minutes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        ai_enabled:
+          type: boolean
+        organization:
+          type: integer
+        archived:
+          type: boolean
+          writeOnly: true
+      required:
+      - name
+    WorkspaceRoleEnum:
+      enum:
+      - owner
+      - admin
+      - editor
+      - viewer
+      type: string
+      description: |-
+        * `owner` - Owner
+        * `admin` - Admin
+        * `editor` - Editor
+        * `viewer` - Viewer
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      bearerFormat: mkt_…
+      description: 'Personal API token created in Settings → API & MCP. Send it as
+        `Authorization: Bearer mkt_…`.'
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+tags:
+- name: auth
+  description: Sign-in, your profile and personal API tokens.
+- name: workspaces
+  description: Workspaces you can use.
+- name: organizations
+  description: Organizations, their members, invitations, shared channels and SSO.
+- name: channels
+  description: Connected social accounts, blogs and sites (shared at organization
+    level).
+- name: posts
+  description: Drafts, per-channel versions, scheduling and team approval.
+- name: targets
+  description: 'One post on one channel: reschedule, cancel, delete from the network.'
+- name: calendar
+  description: Everything scheduled or published in a period.
+- name: media
+  description: Images and videos to attach to posts.
+- name: members
+  description: People in the current workspace and their roles.
+- name: invitations
+  description: Pending invitations to the current workspace.
+- name: campaigns
+  description: Periods with a theme that group posts.
+- name: slots
+  description: Weekly queue times (workspace, team or channel).
+- name: teams
+  description: 'Publishing teams: channel access and approval.'
+- name: analytics
+  description: Metrics per post, channel and period.
+- name: insights
+  description: Best times to post and AI assistance.
+- name: billing
+  description: Plans and subscriptions (Stripe).
+- name: providers
+  description: The networks and sites Markette can publish to, with their limits.
+- name: platform
+  description: Installation administration (superadmins only).

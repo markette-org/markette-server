@@ -1,0 +1,50 @@
+[project]
+name = "markette-server"
+version = "0.1.0"
+description = "Multi-tenant cross-network publishing, scheduling and analytics"
+license = "AGPL-3.0-only"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=5.2,<6.2",
+    "djangorestframework>=3.16",
+    "djangorestframework-simplejwt>=5.5",
+    "django-cors-headers>=4.7",
+    "django-filter>=25.1",
+    "drf-spectacular>=0.28",
+    "psycopg[binary]>=3.2",
+    "celery[redis]>=5.5",
+    "httpx>=0.28",
+    "cryptography>=44",
+    "python-dateutil>=2.9",
+    "pillow>=11",
+    "markdown>=3.7",
+    "openai>=1.60",
+    "stripe>=11.0",
+    "mcp>=1.9",
+    "uvicorn>=0.32",
+    "pyjwt[crypto]>=2.8",
+    "dnspython>=2.6",
+    "pydantic>=2.10",
+    "gunicorn>=23",
+    "whitenoise>=6.9",
+]
+
+[dependency-groups]
+dev = ["ruff==0.13.0", "pytest>=8.3", "pytest-django>=4.10", "respx>=0.22", "time-machine>=2.16"]
+
+[tool.uv]
+# Only resolve releases that have been public for at least two weeks.
+exclude-newer = "2026-09-23T00:00:00Z"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "markette.settings"
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B904", "E501"]

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: markette
+          POSTGRES_USER: markette
+          POSTGRES_PASSWORD: markette
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U markette" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - name: Lint
+        run: uv run --frozen ruff check . && uv run --frozen ruff format --check .
+      - name: Migrations are up to date
+        run: uv run --frozen python manage.py makemigrations --check --dry-run
+      - name: Tests
+        run: uv run --frozen pytest -q
+      - name: OpenAPI schema validates
+        run: uv run --frozen python manage.py spectacular --validate --fail-on-warn --file /tmp/openapi.yaml
