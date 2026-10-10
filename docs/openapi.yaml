@@ -847,6 +847,7 @@ paths:
           - mastodon
           - medium
           - qq
+          - reddit
           - telegram
           - threads
           - webhook
@@ -868,6 +869,7 @@ paths:
           * `qq` - QQ
           * `threads` - Threads
           * `youtube` - YouTube
+          * `reddit` - Reddit
           * `discord` - Discord
           * `ghost` - Ghost
           * `brevo` - Brevo
@@ -1043,6 +1045,81 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/channels/{id}/add-subreddit/:
+    post:
+      operationId: channels_add_subreddit_create
+      description: 'Add a specific subreddit as a channel, using this Reddit channel''s
+        account. Body: {name}.'
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+  /api/channels/{id}/flairs/:
+    get:
+      operationId: channels_flairs_retrieve
+      description: Post flairs available in a Reddit channel's subreddit.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
   /api/channels/{id}/relevance/:
     post:
       operationId: channels_relevance_create
@@ -6481,6 +6558,7 @@ components:
       - qq
       - threads
       - youtube
+      - reddit
       - discord
       - ghost
       - brevo
@@ -6504,6 +6582,7 @@ components:
         * `qq` - QQ
         * `threads` - Threads
         * `youtube` - YouTube
+        * `reddit` - Reddit
         * `discord` - Discord
         * `ghost` - Ghost
         * `brevo` - Brevo

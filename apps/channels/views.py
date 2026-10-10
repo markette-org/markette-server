@@ -85,7 +85,7 @@ class ChannelViewSet(
         return Response(ChannelSerializer(channel, context=self.get_serializer_context()).data)
 
     def get_permissions(self):
-        if self.action in ("destroy", "connect", "select", "relevance"):
+        if self.action in ("destroy", "connect", "select", "relevance", "add_subreddit"):
             self.required_role = Role.ADMIN
         return super().get_permissions()
 
@@ -243,6 +243,44 @@ class ChannelViewSet(
         channel.credentials = {**channel.credentials, "secret": _secrets.token_hex(24)}
         channel.save(update_fields=["credentials", "updated_at"])
         return Response(ChannelSerializer(channel, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=["get"])
+    def flairs(self, request, pk=None):
+        """Post flairs available in a Reddit channel's subreddit."""
+        channel = self.get_object()
+        if channel.provider != "reddit":
+            raise ValidationError({"detail": "Only Reddit channels have post flairs."})
+        provider = channel.get_provider()
+        try:
+            provider.refresh_credentials()
+            return Response(provider.flairs())
+        except ProviderError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+
+    @action(detail=True, methods=["post"], url_path="add-subreddit")
+    def add_subreddit(self, request, pk=None):
+        """Add a specific subreddit as a channel, using this Reddit channel's account. Body: {name}."""
+        from .services import create_channels
+
+        channel = self.get_object()
+        if channel.provider != "reddit":
+            raise ValidationError({"detail": "Subreddits can only be added from a Reddit channel."})
+        provider = channel.get_provider()
+        try:
+            provider.refresh_credentials()
+            candidate = provider.subreddit_candidate(str(request.data.get("name") or ""))
+        except ProviderError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        conn = ConnectionRequest.objects.create(
+            workspace=self.workspace,
+            user=request.user,
+            provider="reddit",
+            candidates={"items": [candidate_to_dict(candidate)]},
+        )
+        [created] = create_channels(conn, [candidate.external_id], request.user)
+        return Response(
+            ChannelSerializer(created, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED
+        )
 
     @action(detail=True, methods=["post"])
     def sync(self, request, pk=None):

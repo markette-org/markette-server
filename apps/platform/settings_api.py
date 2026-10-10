@@ -49,7 +49,9 @@ def _describe(ps):
         for name in conf.SECRETS
     }
     # What to register with each network: built from PUBLIC_API_URL, exactly as the OAuth flows use it.
-    data["callback_urls"] = {key: redirect_uri(key) for key in ("x", "linkedin", "facebook", "threads", "youtube")}
+    data["callback_urls"] = {
+        key: redirect_uri(key) for key in ("x", "linkedin", "facebook", "threads", "youtube", "reddit")
+    }
     data["stripe_webhook_url"] = f"{settings.PUBLIC_API_URL}/api/billing/webhook/"
     data["ai_efforts"] = list(conf.AI_EFFORTS)
     data["ai_providers"] = list(conf.AI_PROVIDERS)

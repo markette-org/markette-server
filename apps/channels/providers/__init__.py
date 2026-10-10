@@ -9,6 +9,7 @@ from .medium import MediumProvider
 from .meta import FacebookProvider, InstagramProvider
 from .newsletters import BrevoProvider, GhostProvider, ListmonkProvider
 from .qq import QQProvider
+from .reddit import RedditProvider
 from .telegram import TelegramProvider
 from .threads import ThreadsProvider
 from .webhook import WebhookProvider
@@ -23,6 +24,7 @@ REGISTRY: dict[str, type[BaseProvider]] = {
         XProvider,
         BlueskyProvider,
         ThreadsProvider,
+        RedditProvider,
         MastodonProvider,
         LinkedInProvider,
         FacebookProvider,

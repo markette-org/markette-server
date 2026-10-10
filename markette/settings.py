@@ -249,6 +249,10 @@ THREADS_APP_SECRET = env("THREADS_APP_SECRET", "")
 # Google Cloud OAuth client for YouTube (YouTube Data API v3 enabled).
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", "")
+# Reddit "web app" (approved under the Responsible Builder Policy)
+REDDIT_CLIENT_ID = env("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = env("REDDIT_CLIENT_SECRET", "")
+REDDIT_USER_AGENT = env("REDDIT_USER_AGENT", "")
 
 # --- Billing (Stripe) -------------------------------------------------------
 # Also editable in Platform → Settings. Webhook endpoint: {PUBLIC_API_URL}/api/billing/webhook/

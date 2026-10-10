@@ -24,6 +24,7 @@ class Provider(models.TextChoices):
     QQ = "qq", "QQ"
     THREADS = "threads", "Threads"
     YOUTUBE = "youtube", "YouTube"
+    REDDIT = "reddit", "Reddit"
     DISCORD = "discord", "Discord"
     GHOST = "ghost", "Ghost"
     BREVO = "brevo", "Brevo"

@@ -133,6 +133,7 @@ PRIORS = {
     "wechat": (_EVENING, "reading"),
     "threads": (_EVENING, "social"),
     "youtube": (_EVENING, "visual"),
+    "reddit": (_WORKDAY, "social"),
     "discord": (_EVENING, "social"),
     "ghost": (_READING, "reading"),
     "brevo": (_READING, "reading"),
