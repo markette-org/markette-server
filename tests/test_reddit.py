@@ -274,3 +274,25 @@ def test_link_domain_rules(workspace):
     p = rd.RedditProvider(ch(workspace, cfg))
     content = Content(text="", title="t", link="https://blog.medium.com/x", options={"post_type": "link"})
     assert p.validate(content) == ["r/python does not accept links to blog.medium.com."]
+
+
+@respx.mock
+def test_revoked_token_flags_channel_for_reauth(api, workspace):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    c = Channel.create_for(
+        workspace=workspace,
+        provider="reddit",
+        external_id="python",
+        name="r/python",
+        credentials={"access_token": "tok", "refresh_token": "r"},
+        config=dict(CFG),
+        token_expires_at=timezone.now() + timedelta(hours=5),
+    )
+    respx.get(f"{rd.API}/r/python/api/link_flair_v2").mock(return_value=httpx.Response(401, json={"error": 401}))
+    r = api.get(f"/api/channels/{c.id}/flairs/")
+    assert r.status_code == 400 and "reconnect Reddit" in r.json()["detail"]
+    c.refresh_from_db()
+    assert c.status == "needs_reauth"

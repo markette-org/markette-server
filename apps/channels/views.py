@@ -255,7 +255,7 @@ class ChannelViewSet(
             provider.refresh_credentials()
             return Response(provider.flairs())
         except ProviderError as exc:
-            raise ValidationError({"detail": str(exc)}) from exc
+            raise _reddit_error(channel, exc) from exc
 
     @action(detail=True, methods=["post"], url_path="add-subreddit")
     def add_subreddit(self, request, pk=None):
@@ -270,7 +270,7 @@ class ChannelViewSet(
             provider.refresh_credentials()
             candidate = provider.subreddit_candidate(str(request.data.get("name") or ""))
         except ProviderError as exc:
-            raise ValidationError({"detail": str(exc)}) from exc
+            raise _reddit_error(channel, exc) from exc
         conn = ConnectionRequest.objects.create(
             workspace=self.workspace,
             user=request.user,
@@ -330,6 +330,13 @@ def oauth_callback(request, provider):
         create_channels(conn, [candidates[0].external_id], conn.user)
         return redirect(f"{settings.FRONTEND_URL}/channels?{urlencode({'connected': conn.provider})}")
     return redirect(target)
+
+
+def _reddit_error(channel, exc):
+    if exc.auth:
+        channel.mark_needs_reauth(str(exc))
+        return ValidationError({"detail": "Reddit no longer accepts this channel's access; reconnect Reddit."})
+    return ValidationError({"detail": str(exc)})
 
 
 def _provider_aliases(provider):
