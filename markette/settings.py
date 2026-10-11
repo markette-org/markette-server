@@ -253,6 +253,9 @@ GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", "")
 REDDIT_CLIENT_ID = env("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = env("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT = env("REDDIT_USER_AGENT", "")
+# Slack app for "Add to Slack" (optional: without it users paste a bot token)
+SLACK_CLIENT_ID = env("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET = env("SLACK_CLIENT_SECRET", "")
 
 # --- Billing (Stripe) -------------------------------------------------------
 # Also editable in Platform → Settings. Webhook endpoint: {PUBLIC_API_URL}/api/billing/webhook/

@@ -26,6 +26,7 @@ class Provider(models.TextChoices):
     YOUTUBE = "youtube", "YouTube"
     REDDIT = "reddit", "Reddit"
     DISCORD = "discord", "Discord"
+    SLACK = "slack", "Slack"
     GHOST = "ghost", "Ghost"
     BREVO = "brevo", "Brevo"
     LISTMONK = "listmonk", "Listmonk"

@@ -164,6 +164,11 @@ class BaseProvider:
         return True
 
     @classmethod
+    def auth_mode(cls) -> str:
+        """How users connect: "oauth2" or "credentials" (a provider may offer either, depending on the server)."""
+        return cls.capabilities.auth
+
+    @classmethod
     def describe(cls):
         caps = cls.capabilities
         return {
@@ -171,7 +176,7 @@ class BaseProvider:
             "label": cls.label,
             "configured": cls.is_configured(),
             "kind": caps.kind,
-            "auth": caps.auth,
+            "auth": cls.auth_mode(),
             "instance_url": caps.instance_url,
             "max_chars": caps.max_chars,
             "count_mode": caps.count_mode,

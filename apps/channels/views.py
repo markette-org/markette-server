@@ -109,7 +109,7 @@ class ChannelViewSet(
         )
         provider = cls()
         try:
-            if cls.capabilities.auth == "oauth2":
+            if cls.auth_mode() == "oauth2":
                 return Response({"request_id": conn.id, "authorize_url": provider.authorization_url(conn)})
             creds = s.validated_data.get("credentials") or {}
             missing = [f.name for f in cls.credential_fields if f.required and not creds.get(f.name)]

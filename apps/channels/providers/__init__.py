@@ -10,6 +10,7 @@ from .meta import FacebookProvider, InstagramProvider
 from .newsletters import BrevoProvider, GhostProvider, ListmonkProvider
 from .qq import QQProvider
 from .reddit import RedditProvider
+from .slack import SlackProvider
 from .telegram import TelegramProvider
 from .threads import ThreadsProvider
 from .webhook import WebhookProvider
@@ -35,6 +36,7 @@ REGISTRY: dict[str, type[BaseProvider]] = {
         WeChatProvider,
         QQProvider,
         DiscordProvider,
+        SlackProvider,
         WordPressProvider,
         DrupalProvider,
         MediumProvider,

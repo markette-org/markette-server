@@ -135,6 +135,7 @@ PRIORS = {
     "youtube": (_EVENING, "visual"),
     "reddit": (_WORKDAY, "social"),
     "discord": (_EVENING, "social"),
+    "slack": (_WORKDAY, "office"),
     "ghost": (_READING, "reading"),
     "brevo": (_READING, "reading"),
     "listmonk": (_READING, "reading"),
