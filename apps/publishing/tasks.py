@@ -12,7 +12,7 @@ publish_target
 """
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from celery import shared_task
@@ -28,6 +28,8 @@ from .models import PostTarget, TargetStatus
 log = logging.getLogger(__name__)
 DISPATCH_BATCH = 200
 STUCK_AFTER = timedelta(minutes=20)
+# Clock skew allowed when looking for a post an earlier attempt may have created.
+LOOKUP_SKEW = timedelta(minutes=5)
 
 
 # Stands in for the URL of a publication that is not live yet, so lengths are checked realistically.
@@ -156,6 +158,7 @@ def publish_target(target_id):
 
     channel = target.channel
     provider = channel.get_provider()
+    started, sending = timezone.now(), False
     try:
         provider.refresh_credentials()
         content = build_content(target)
@@ -163,9 +166,12 @@ def publish_target(target_id):
         if problems:
             raise ProviderError(" ".join(problems))
         content, first_comment = provider.prepare_first_comment(content)
-        result = provider.publish(content)
+        result = _earlier_copy(target, provider, content)
+        if result is None:
+            sending = True  # only a lost answer from here on may have created the post
+            result = provider.publish(content)
     except ProviderError as exc:
-        return _handle_failure(target, exc)
+        return _handle_failure(target, exc, provider, started if sending else None)
     except Exception as exc:  # noqa: BLE001 - a bug must not leave the target stuck in "publishing"
         log.exception("Unexpected error publishing target %s", target_id)
         return _handle_failure(target, ProviderError(f"Internal error: {exc}"))
@@ -179,6 +185,7 @@ def publish_target(target_id):
     target.next_attempt_at = None
     target.next_metrics_at = now + timedelta(hours=1) if provider.capabilities.has_metrics else None
     target.extra = {**(target.extra or {}), **{k: v for k, v in result.extra.items() if v is not None}}
+    target.extra.pop("maybe_live_since", None)
     if result.extra.get("note"):
         # Published, but with a caveat worth showing (e.g. YouTube kept the video private).
         target.last_error = f"Published, but {result.extra['note'][0].lower()}{result.extra['note'][1:]}"
@@ -198,7 +205,45 @@ def publish_target(target_id):
     return "published"
 
 
-def _handle_failure(target, exc: ProviderError):
+def _earlier_copy(target, provider, content):
+    """After a lost answer, the post an earlier attempt created, so it is not published twice."""
+    since = (target.extra or {}).get("maybe_live_since")
+    if not since or provider.duplicate_guard != "lookup":
+        return None
+    found = provider.find_published(content, datetime.fromisoformat(since))
+    if found and (
+        PostTarget.objects.filter(channel=target.channel, external_id=found.external_id).exclude(pk=target.pk).exists()
+    ):
+        return None  # that post belongs to another publication
+    if found:
+        log.info("Target %s was already live on %s: %s", target.pk, target.channel.provider, found.url)
+    return found
+
+
+def mark_unconfirmed(target, reason):
+    """The post may be live: hold it, and its followers, until a person checks the network."""
+    target.status = TargetStatus.UNCONFIRMED
+    target.next_attempt_at = None
+    target.last_error = (
+        f"{reason} It may be live: check {target.channel.name}, then mark it as published or publish it again."
+    )[:4000]
+    target.save(update_fields=["status", "last_error", "next_attempt_at", "extra", "updated_at"])
+    target.post.refresh_status()
+    from .scheduling import note_followers
+
+    note_followers(target, f"Waiting for {target.channel.name}, whose publication needs checking.")
+    log.warning("Publishing target %s is unconfirmed: %s", target.pk, reason)
+    return target.status
+
+
+def _handle_failure(target, exc: ProviderError, provider=None, started=None):
+    if exc.uncertain and started:
+        extra = target.extra or {}
+        # Keep the earliest moment the post may have been created.
+        extra.setdefault("maybe_live_since", (started - LOOKUP_SKEW).isoformat())
+        target.extra = extra
+        if not (provider and provider.duplicate_guard):
+            return mark_unconfirmed(target, f"{target.channel.name} did not answer in time ({exc}).")
     target.last_error = str(exc)[:4000]
     if exc.auth:
         target.channel.mark_needs_reauth(str(exc))
@@ -208,7 +253,7 @@ def _handle_failure(target, exc: ProviderError):
         target.next_attempt_at = timezone.now() + backoff(target.attempts, exc.retry_after)
     else:
         target.status = TargetStatus.FAILED
-    target.save(update_fields=["status", "last_error", "next_attempt_at", "updated_at"])
+    target.save(update_fields=["status", "last_error", "next_attempt_at", "extra", "updated_at"])
     target.post.refresh_status()
     if target.status == TargetStatus.FAILED:
         from .scheduling import note_followers
@@ -226,10 +271,17 @@ def requeue_stuck_targets():
         status=TargetStatus.SCHEDULED,
         updated_at=timezone.now(),
     )
-    # A worker died mid-call: the post may or may not be live, so do not risk a duplicate.
-    for t in PostTarget.objects.filter(status=TargetStatus.PUBLISHING, updated_at__lt=cutoff).select_related("post"):
-        t.status = TargetStatus.FAILED
-        t.last_error = "Publishing was interrupted; check the channel before retrying to avoid a duplicate."
-        t.save(update_fields=["status", "last_error", "updated_at"])
-        t.post.refresh_status()
+    # A worker died mid-call: the post may or may not be live. Networks that can tell (or drop
+    # repeats) are retried; for the others a person checks, so nothing is published twice.
+    stuck = PostTarget.objects.filter(status=TargetStatus.PUBLISHING, updated_at__lt=cutoff)
+    for t in stuck.select_related("post", "channel"):
+        t.extra = {"maybe_live_since": (t.updated_at - LOOKUP_SKEW).isoformat(), **(t.extra or {})}
+        if t.channel.get_provider().duplicate_guard:
+            t.status = TargetStatus.SCHEDULED
+            t.next_attempt_at = None
+            t.save(update_fields=["status", "next_attempt_at", "extra", "updated_at"])
+            t.post.refresh_status()
+            requeued += 1
+        else:
+            mark_unconfirmed(t, "Publishing was interrupted.")
     return requeued

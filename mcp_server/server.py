@@ -197,7 +197,8 @@ async def list_posts(
     awaiting_my_review: bool = False,
     limit: int = 20,
 ) -> list[dict]:
-    """List recent posts. status: draft, scheduled, publishing, published, partial or failed (comma-separated)."""
+    """List recent posts. status: draft, scheduled, publishing, published, partial, failed or
+    unconfirmed (a channel may have published it but did not confirm: check it before retrying), comma-separated."""
     params: dict[str, Any] = {"limit": min(max(limit, 1), 100)}
     if status:
         params["status"] = status

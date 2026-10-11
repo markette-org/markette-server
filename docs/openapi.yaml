@@ -4560,6 +4560,50 @@ paths:
               schema:
                 $ref: '#/components/schemas/Target'
           description: ''
+  /api/targets/{id}/resolve/:
+    post:
+      operationId: targets_resolve_create
+      description: 'Settles an unconfirmed publication: {"published": true, "url":
+        ...} or {"published": false}.'
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
   /api/teams/:
     get:
       operationId: teams_list
@@ -6565,6 +6609,7 @@ components:
       - publishing
       - published
       - partial
+      - unconfirmed
       - failed
       type: string
       description: |-
@@ -6573,6 +6618,7 @@ components:
         * `publishing` - Publishing
         * `published` - Published
         * `partial` - Partially published
+        * `unconfirmed` - Needs checking
         * `failed` - Failed
     ProviderEnum:
       enum:
@@ -6877,6 +6923,7 @@ components:
       - queued
       - publishing
       - published
+      - unconfirmed
       - failed
       - cancelled
       type: string
@@ -6886,6 +6933,7 @@ components:
         * `queued` - Queued
         * `publishing` - Publishing
         * `published` - Published
+        * `unconfirmed` - Unconfirmed
         * `failed` - Failed
         * `cancelled` - Cancelled
     Team:

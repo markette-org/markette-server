@@ -97,7 +97,7 @@ def test_interrupted_publish_is_not_retried_blindly(api, channel):
     PostTarget.objects.filter(post_id=post["id"]).update(updated_at=timezone.now() - timedelta(hours=1))
     requeue_stuck_targets()
     t = PostTarget.objects.get(post_id=post["id"])
-    assert t.status == TargetStatus.FAILED and "duplicate" in t.last_error
+    assert t.status == TargetStatus.UNCONFIRMED and "It may be live" in t.last_error
 
 
 def test_queue_mode_uses_next_free_slot(api, channel, workspace):

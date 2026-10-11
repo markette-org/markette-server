@@ -58,6 +58,7 @@ class PostStatus(models.TextChoices):
     PUBLISHING = "publishing", "Publishing"
     PUBLISHED = "published", "Published"
     PARTIAL = "partial", "Partially published"
+    UNCONFIRMED = "unconfirmed", "Needs checking"
     FAILED = "failed", "Failed"
 
 
@@ -125,6 +126,8 @@ class Post(TimeStamped):
             status = PostStatus.FAILED
         elif any(s in (TargetStatus.QUEUED, TargetStatus.PUBLISHING) for s in states):
             status = PostStatus.PUBLISHING
+        elif any(s == TargetStatus.UNCONFIRMED for s in states):
+            status = PostStatus.UNCONFIRMED
         elif any(s == TargetStatus.SCHEDULED for s in states):
             status = PostStatus.SCHEDULED
         elif all(s == TargetStatus.DRAFT for s in states):
@@ -153,6 +156,8 @@ class TargetStatus(models.TextChoices):
     QUEUED = "queued", "Queued"
     PUBLISHING = "publishing", "Publishing"
     PUBLISHED = "published", "Published"
+    # The network may have published it but its answer was lost: a person checks before it is retried.
+    UNCONFIRMED = "unconfirmed", "Unconfirmed"
     FAILED = "failed", "Failed"
     CANCELLED = "cancelled", "Cancelled"
 

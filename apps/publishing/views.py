@@ -1,6 +1,8 @@
 import mimetypes
+import re
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -28,6 +30,8 @@ from .serializers import (
     TargetSerializer,
 )
 from .tasks import build_content
+
+URL_RE = re.compile(r"^https?://\S+$")
 
 ALLOWED_MEDIA = ("image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/quicktime")
 
@@ -308,7 +312,12 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
         return access.filter_channels(super().get_queryset(), self.membership, "channel__")
 
     def perform_update(self, serializer):
-        if serializer.instance.status in (TargetStatus.PUBLISHED, TargetStatus.PUBLISHING, TargetStatus.QUEUED):
+        if serializer.instance.status in (
+            TargetStatus.PUBLISHED,
+            TargetStatus.PUBLISHING,
+            TargetStatus.QUEUED,
+            TargetStatus.UNCONFIRMED,
+        ):
             raise ValidationError("A publication that is live or in flight cannot be edited.")
         serializer.save()
 
@@ -325,7 +334,12 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
         target = self.get_object()
-        if target.status not in (TargetStatus.DRAFT, TargetStatus.SCHEDULED, TargetStatus.FAILED):
+        if target.status not in (
+            TargetStatus.DRAFT,
+            TargetStatus.SCHEDULED,
+            TargetStatus.FAILED,
+            TargetStatus.UNCONFIRMED,
+        ):
             raise ValidationError("Only pending publications can be cancelled.")
         target.status = TargetStatus.CANCELLED
         target.save(update_fields=["status", "updated_at"])
@@ -333,6 +347,47 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
         scheduling.note_followers(
             target, f"{target.channel.name} was cancelled, so there is nothing to link to.", fail=True
         )
+        return Response(TargetSerializer(target, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=["post"])
+    def resolve(self, request, pk=None):
+        """Settles an unconfirmed publication: {"published": true, "url": ...} or {"published": false}."""
+        target = self.get_object()
+        if target.status != TargetStatus.UNCONFIRMED:
+            raise ValidationError("Only unconfirmed publications need checking.")
+        published = request.data.get("published")
+        if published not in (True, False):
+            raise ValidationError({"published": "Say whether the post is live (true) or not (false)."})
+        extra = {k: v for k, v in (target.extra or {}).items() if k != "maybe_live_since"}
+        if published:
+            url = (request.data.get("url") or "").strip()
+            if url and not URL_RE.match(url):
+                raise ValidationError({"url": "Enter the post's address, starting with https://."})
+            waiting = target.followers.filter(status=TargetStatus.SCHEDULED, scheduled_at__isnull=True)
+            if not url and waiting.exists():
+                raise ValidationError({"url": "Publications waiting for this one need its address."})
+            now = timezone.now()
+            target.status = TargetStatus.PUBLISHED
+            target.published_at = now
+            target.external_url = url[:1000]
+            target.last_error = "Marked as published by hand: statistics are not collected for it."
+            target.next_metrics_at = None
+        else:
+            target.status = TargetStatus.SCHEDULED
+            target.scheduled_at = timezone.now()
+            target.attempts = 0
+            target.last_error = ""
+        target.next_attempt_at = None
+        target.extra = extra
+        target.save()
+        target.post.refresh_status()
+        if published:
+            with transaction.atomic():
+                scheduling.release_followers(target)
+        else:
+            from .tasks import dispatch_due_targets
+
+            dispatch_due_targets.delay()
         return Response(TargetSerializer(target, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="delete-remote")

@@ -19,6 +19,7 @@ def _byte_span(text, start, end):
 class BlueskyProvider(BaseProvider):
     key = "bluesky"
     label = "Bluesky"
+    duplicate_guard = "lookup"
     capabilities = Capabilities(
         max_chars=300,
         count_mode="graphemes",
@@ -189,12 +190,26 @@ class BlueskyProvider(BaseProvider):
                 "record": record,
             },
         ).json()
-        uri = res["uri"]
+        return self._result(res["uri"], res.get("cid"))
+
+    def _result(self, uri, cid):
         rkey = uri.rsplit("/", 1)[-1]
         handle = (self.channel.handle or self.channel.external_id).lstrip("@")
-        return PublishResult(
-            external_id=uri, url=f"https://bsky.app/profile/{handle}/post/{rkey}", extra={"cid": res.get("cid")}
-        )
+        return PublishResult(external_id=uri, url=f"https://bsky.app/profile/{handle}/post/{rkey}", extra={"cid": cid})
+
+    def find_published(self, content, since):
+        # The account's latest posts straight from its PDS (no AppView delay), newest first.
+        records = self._xrpc(
+            "GET",
+            "com.atproto.repo.listRecords",
+            params={"repo": self.channel.external_id, "collection": "app.bsky.feed.post", "limit": 30},
+        ).json()["records"]
+        for r in records:
+            value = r.get("value") or {}
+            created = _parse_time(value.get("createdAt"))
+            if value.get("text") == content.text and created and created >= since:
+                return self._result(r["uri"], r.get("cid"))
+        return None
 
     def delete(self, external_id):
         rkey = external_id.rsplit("/", 1)[-1]
@@ -228,6 +243,14 @@ class BlueskyProvider(BaseProvider):
             "GET", f"{APPVIEW}/xrpc/app.bsky.actor.getProfile", params={"actor": self.channel.external_id}
         ).json()
         return prof.get("followersCount")
+
+
+def _parse_time(value):
+    try:
+        when = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=UTC)
 
 
 def _pds_from_did_doc(doc):

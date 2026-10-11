@@ -36,6 +36,8 @@ def normalize_instance(url):
 class MastodonProvider(BaseProvider):
     key = "mastodon"
     label = "Mastodon"
+    # Mastodon drops a repeated status with the same Idempotency-Key (kept for an hour).
+    duplicate_guard = "idempotent"
     capabilities = Capabilities(
         max_chars=500,
         count_mode="mastodon",

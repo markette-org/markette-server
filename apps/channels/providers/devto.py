@@ -29,6 +29,7 @@ def normalize_tags(tags):
 class DevtoProvider(BaseProvider):
     key = "devto"
     label = "DEV"
+    duplicate_guard = "lookup"
     capabilities = Capabilities(
         kind="blog",
         max_chars=None,
@@ -170,6 +171,21 @@ class DevtoProvider(BaseProvider):
         )
         data = resp.json()
         return PublishResult(external_id=str(data["id"]), url=data.get("url", ""))
+
+    def find_published(self, content, since):
+        # Your articles, drafts included, newest first. Forem gives no creation time, so the
+        # article must match the title and the text exactly.
+        article = self._article(content)
+        items = self.http(
+            "GET", f"{self.base}/api/articles/me/all", headers=self._headers(), params={"page": 1, "per_page": 30}
+        ).json()
+        for a in items:
+            if (
+                a.get("title") == article["title"]
+                and (a.get("body_markdown") or "").strip() == article["body_markdown"].strip()
+            ):
+                return PublishResult(external_id=str(a["id"]), url=a.get("url", ""))
+        return None
 
     def delete(self, external_id):
         # Forem cannot delete through the API: unpublishing hides the article (it becomes a draft).

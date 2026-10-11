@@ -23,12 +23,17 @@ class ProviderError(Exception):
 
     ``retryable`` errors (rate limits, 5xx, network) are retried with backoff;
     ``auth`` errors flag the channel for re-authentication; anything else is a
-    permanent failure of that one publication.
+    permanent failure of that one publication. ``uncertain`` errors lost the answer
+    to a request the network may have carried out (a timeout after sending it): the
+    post may be live, so retrying blindly could publish it twice.
     """
 
-    def __init__(self, message, *, retryable=False, auth=False, retry_after=None, status=None, payload=None):
+    def __init__(
+        self, message, *, retryable=False, auth=False, retry_after=None, status=None, payload=None, uncertain=False
+    ):
         super().__init__(message)
         self.retryable = retryable
+        self.uncertain = uncertain
         self.auth = auth
         self.retry_after = retry_after
         self.status = status
@@ -154,6 +159,11 @@ class BaseProvider:
     capabilities: ClassVar[Capabilities] = Capabilities()
     credential_fields: ClassVar[list[CredentialField]] = []
     timeout = httpx.Timeout(30.0, connect=10.0)
+    # What makes publishing again safe after an answer was lost (ProviderError.uncertain):
+    #   "idempotent": the network drops a repeated request with the same Content.idempotency_key;
+    #   "lookup": find_published() reliably tells whether the earlier attempt landed.
+    # None: nothing does, so a person has to check the network before it is published again.
+    duplicate_guard: ClassVar[str | None] = None
 
     def __init__(self, channel=None):
         self.channel = channel
@@ -285,6 +295,10 @@ class BaseProvider:
     def fetch_audience(self) -> int | None:
         return None
 
+    def find_published(self, content: Content, since: datetime) -> PublishResult | None:
+        """The post an earlier attempt created for ``content`` since ``since``, if it landed (duplicate_guard "lookup")."""
+        return None
+
     def delete(self, external_id: str) -> None:
         raise ProviderError(f"{self.label} does not support deleting from Markette.")
 
@@ -305,13 +319,23 @@ class BaseProvider:
         try:
             with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
                 resp = client.request(method, url, **kwargs)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
+            # The request never reached the network: always safe to try again.
+            raise ProviderError(f"{self.label}: could not reach {url}: {exc}", retryable=True) from exc
         except httpx.TimeoutException as exc:
-            raise ProviderError(f"{self.label}: timeout calling {url}", retryable=True) from exc
+            raise ProviderError(
+                f"{self.label}: timeout calling {url}", retryable=True, uncertain=_changes(method)
+            ) from exc
         except httpx.HTTPError as exc:
-            raise ProviderError(f"{self.label}: network error: {exc}", retryable=True) from exc
+            raise ProviderError(
+                f"{self.label}: network error: {exc}", retryable=True, uncertain=_changes(method)
+            ) from exc
         if resp.status_code in expect:
             return resp
-        raise self.error_from_response(resp)
+        err = self.error_from_response(resp)
+        if resp.status_code in (502, 504) and _changes(method):
+            err.uncertain = True  # a gateway lost the answer of a server that may have done the work
+        raise err
 
     def error_from_response(self, resp: httpx.Response) -> ProviderError:
         try:
@@ -328,6 +352,11 @@ class BaseProvider:
         if status >= 500 or status in (408, 409):
             return ProviderError(msg, retryable=True, status=status, payload=payload)
         return ProviderError(msg, status=status, payload=payload)
+
+
+def _changes(method):
+    """Whether repeating a request of this method could do the work twice."""
+    return method.upper() in ("POST", "PATCH")
 
 
 def _short(payload, limit=500):
