@@ -20,7 +20,7 @@ from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri
+from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
 from .text import URL_RE
 
 AUTHORIZE = "https://www.reddit.com/api/v1/authorize"
@@ -343,6 +343,7 @@ class RedditProvider(BaseProvider):
             comment = "\n\n".join(filter(None, [body, comment]))
         return content, comment
 
+    @repeatable
     def _upload_image(self, item):
         lease = self.api(
             "POST", "/api/media/asset.json", data={"filepath": item.filename or "image.jpg", "mimetype": item.mime}

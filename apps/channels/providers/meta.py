@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri
+from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
 
 SCOPES = [
     "pages_show_list",
@@ -235,6 +235,7 @@ class InstagramProvider(MetaBase):
             problems.append("Instagram allows at most 30 hashtags.")
         return problems
 
+    @repeatable
     def _container(self, item, *, carousel_item=False, caption=None, extra=None):
         ig = self.channel.external_id
         data = dict(extra or {})

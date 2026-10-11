@@ -19,7 +19,16 @@ from urllib.parse import urlencode
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, CredentialField, ProviderError, PublishResult, redirect_uri
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    CredentialField,
+    ProviderError,
+    PublishResult,
+    redirect_uri,
+    repeatable,
+)
 
 API = "https://slack.com/api"
 AUTHORIZE = "https://slack.com/oauth/v2/authorize"
@@ -29,6 +38,9 @@ SCOPES = [
     "channels:read",
     "channels:join",
     "groups:read",
+    # Reading recent messages tells whether a post whose answer was lost landed (no duplicates).
+    "channels:history",
+    "groups:history",
     "files:write",
     "files:read",
     "team:read",
@@ -60,6 +72,8 @@ def escape(text):
 class SlackProvider(BaseProvider):
     key = "slack"
     label = "Slack"
+    # Needs the history scopes; a token without them makes Markette ask a person to check instead.
+    duplicate_guard = "lookup"
     capabilities = Capabilities(
         max_chars=TEXT_LIMIT,
         max_media=10,
@@ -264,6 +278,16 @@ class SlackProvider(BaseProvider):
         # Slack shares files asynchronously; without the message timestamp keep the files.
         return PublishResult(external_id=f"{channel_id}:files:{','.join(file_ids)}", url="")
 
+    def find_published(self, content, since):
+        channel_id, text = self.channel.external_id, self._text(content)
+        history = self._call(
+            "conversations.history", http="GET", channel=channel_id, oldest=f"{since.timestamp():.6f}", limit=100
+        )
+        for m in history.get("messages", []):
+            if (m.get("bot_id") or m.get("app_id")) and m.get("text") == text:
+                return PublishResult(external_id=f"{channel_id}:{m['ts']}", url=self._permalink(channel_id, m["ts"]))
+        return None
+
     def _in_channel(self, send):
         """Runs ``send``; if the app is not in this public channel yet, joins it and retries once."""
         try:
@@ -276,6 +300,7 @@ class SlackProvider(BaseProvider):
         self._call("conversations.join", channel=self.channel.external_id)
         return send()
 
+    @repeatable
     def _upload(self, item):
         data = item.read()
         params = {"filename": item.filename or "file", "length": len(data)}

@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri
+from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
 
 AUTHORIZE = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -155,6 +155,7 @@ class LinkedInProvider(BaseProvider):
         return self.creds.get("author") or self.channel.external_id
 
     # --- publishing ------------------------------------------------------
+    @repeatable
     def _upload(self, item):
         kind = "videos" if item.is_video else "images"
         if item.is_video:
@@ -234,6 +235,24 @@ class LinkedInProvider(BaseProvider):
         resp = self.http("POST", f"{REST}/posts", headers=self.headers, json=body)
         urn = resp.headers.get("x-restli-id") or resp.headers.get("x-linkedin-id", "")
         return PublishResult(external_id=urn, url=f"https://www.linkedin.com/feed/update/{urn}/")
+
+    @property
+    def duplicate_guard(self):
+        # Only organization pages can read their own posts back (r_organization_social);
+        # LinkedIn grants no such permission for personal profiles.
+        return "lookup" if self.author.startswith("urn:li:organization:") else None
+
+    def find_published(self, content, since):
+        posts = self.http(
+            "GET",
+            f"{REST}/posts?q=author&author={quote(self.author, safe='')}&count=20&sortBy=LAST_MODIFIED",
+            headers={**self.headers, "X-RestLi-Method": "FINDER"},
+        ).json()
+        commentary = _escape_little_text(content.text)
+        for p in posts.get("elements", []):
+            if p.get("commentary") == commentary and (p.get("createdAt") or 0) >= since.timestamp() * 1000:
+                return PublishResult(external_id=p["id"], url=f"https://www.linkedin.com/feed/update/{p['id']}/")
+        return None
 
     def post_first_comment(self, external_id, text):
         resp = self.http(

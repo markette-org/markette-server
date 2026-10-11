@@ -7,7 +7,7 @@ cannot edit, delete or read statistics.
 
 import re
 
-from .base import BaseProvider, Candidate, Capabilities, CredentialField, ProviderError, PublishResult
+from .base import BaseProvider, Candidate, Capabilities, CredentialField, ProviderError, PublishResult, repeatable
 
 API = "https://api.medium.com/v1"
 MAX_TAGS = 3
@@ -90,6 +90,7 @@ class MediumProvider(BaseProvider):
             problems.append(f"Medium accepts at most {MAX_TAGS} tags.")
         return problems
 
+    @repeatable
     def _upload(self, item):
         data = self.http(
             "POST",

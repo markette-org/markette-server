@@ -1,6 +1,7 @@
 """A network that publishes the post but whose answer never arrives must not get it twice."""
 
 import json
+import time
 from datetime import timedelta
 
 import httpx
@@ -9,6 +10,7 @@ import respx
 from django.utils import timezone
 
 from apps.channels.models import Channel
+from apps.channels.providers import ProviderError
 from apps.channels.providers import x as xmod
 from apps.channels.providers.bluesky import DEFAULT_SERVICE, BlueskyProvider
 from apps.channels.providers.devto import DEFAULT_BASE
@@ -274,3 +276,149 @@ def test_lost_answers_before_the_post_is_sent_are_plain_retries(api, x):
     publish(api, [{"channel": x.id}])
     tweet = PostTarget.objects.get(channel=x)
     assert tweet.status == TargetStatus.SCHEDULED and not tweets.called and "maybe_live_since" not in tweet.extra
+
+
+def other_channel(workspace, provider, **fields):
+    return Channel.create_for(workspace=workspace, provider=provider, name=provider.title(), **fields)
+
+
+@respx.mock
+def test_wordpress_finds_the_post_it_created(api, workspace):
+    site = "https://blog.example"
+    wp = other_channel(
+        workspace, "wordpress", external_id=site, base_url=site, credentials={"username": "ada", "app_password": "p"}
+    )
+    stored = []
+    create = respx.post(f"{site}/wp-json/wp/v2/posts").mock(
+        side_effect=lose_answer_once(
+            stored,
+            lambda req: {
+                "id": 12,
+                "link": f"{site}/hello",
+                "modified_gmt": timezone.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                "title": {"raw": json.loads(req.content)["title"]},
+                # WordPress may reformat the markup; the words are what count.
+                "content": {"raw": json.loads(req.content)["content"].replace("<p>", "<p class='x'>")},
+            },
+        )
+    )
+    search = respx.get(f"{site}/wp-json/wp/v2/posts").mock(side_effect=lambda req: httpx.Response(200, json=stored))
+    publish(api, [{"channel": wp.id}])
+    target = run_retry(PostTarget.objects.get(channel=wp))
+    assert target.status == TargetStatus.PUBLISHED and target.external_url == f"{site}/hello"
+    assert create.call_count == 1 and search.calls.last.request.url.params["context"] == "edit"
+
+
+@respx.mock
+def test_drupal_reads_back_the_node_by_its_own_uuid(api, workspace):
+    site = "https://cms.example"
+    drupal = other_channel(
+        workspace,
+        "drupal",
+        external_id=f"{site}#article",
+        base_url=site,
+        credentials={"auth_method": "basic", "username": "ada", "password": "p"},
+        config={"bundle": "article"},
+    )
+    nodes = {}
+
+    def create(request):
+        data = json.loads(request.content)["data"]
+        nodes[data["id"]] = {"id": data["id"], "attributes": {"drupal_internal__nid": 7, "path": {"alias": "/hi"}}}
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    route = respx.post(f"{site}/jsonapi/node/article").mock(side_effect=create)
+    respx.get(url__regex=rf"{site}/jsonapi/node/article/.+").mock(
+        side_effect=lambda req: httpx.Response(200, json={"data": nodes[req.url.path.rsplit("/", 1)[-1]]})
+        if req.url.path.rsplit("/", 1)[-1] in nodes
+        else httpx.Response(404, json={"errors": []})
+    )
+    publish(api, [{"channel": drupal.id}])
+    target = run_retry(PostTarget.objects.get(channel=drupal))
+    assert target.status == TargetStatus.PUBLISHED and target.external_url == f"{site}/hi"
+    assert route.call_count == 1 and target.external_id in nodes
+
+
+@respx.mock
+def test_slack_reads_the_channel_or_asks_a_person(api, workspace):
+    from apps.channels.providers.slack import API as SLACK
+
+    slack = other_channel(
+        workspace, "slack", external_id="C1", credentials={"bot_token": "xoxb-1"}, config={"team_id": "T1"}
+    )
+    sent = []
+
+    def post(request):
+        sent.append(json.loads(request.content))
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    route = respx.post(f"{SLACK}/chat.postMessage").mock(side_effect=post)
+    history = respx.get(f"{SLACK}/conversations.history").mock(
+        side_effect=lambda req: httpx.Response(
+            200, json={"ok": True, "messages": [{"ts": "17.5", "bot_id": "B1", "text": s["text"]} for s in sent]}
+        )
+    )
+    respx.get(f"{SLACK}/chat.getPermalink").mock(
+        return_value=httpx.Response(200, json={"ok": True, "permalink": "https://acme.slack.com/archives/C1/p175"})
+    )
+    publish(api, [{"channel": slack.id}])
+    target = run_retry(PostTarget.objects.get(channel=slack))
+    assert target.status == TargetStatus.PUBLISHED and target.external_id == "C1:17.5" and route.call_count == 1
+
+    # A token installed before the history scopes cannot check: a person decides.
+    sent.clear()
+    history.mock(return_value=httpx.Response(200, json={"ok": False, "error": "missing_scope"}))
+    publish(api, [{"channel": slack.id}])
+    target = run_retry(PostTarget.objects.filter(channel=slack).latest("pk"))
+    assert target.status == TargetStatus.UNCONFIRMED and "could not be checked" in target.last_error
+    assert route.call_count == 2 and Channel.objects.get(pk=slack.pk).status == "active"
+
+
+@respx.mock
+def test_linkedin_pages_look_up_their_posts_but_profiles_cannot(api, workspace):
+    from apps.channels.providers.linkedin import REST
+
+    def li(author):
+        return other_channel(
+            workspace,
+            "linkedin",
+            external_id=author,
+            credentials={"access_token": "t", "author": author},
+            token_expires_at=FAR,
+        )
+
+    page, profile = li("urn:li:organization:5"), li("urn:li:person:ada")
+    posts = []
+
+    def create(request):
+        body = json.loads(request.content)
+        posts.append({"id": "urn:li:share:9", "commentary": body["commentary"], "createdAt": int(time.time() * 1000)})
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    route = respx.post(f"{REST}/posts").mock(side_effect=create)
+    respx.get(url__startswith=f"{REST}/posts?q=author").mock(
+        side_effect=lambda req: httpx.Response(200, json={"elements": posts})
+    )
+    publish(api, [{"channel": page.id}, {"channel": profile.id}])
+    assert PostTarget.objects.get(channel=profile).status == TargetStatus.UNCONFIRMED
+    target = run_retry(PostTarget.objects.get(channel=page))
+    assert target.status == TargetStatus.PUBLISHED and target.external_id == "urn:li:share:9"
+    assert route.call_count == 2  # once per channel, never repeated
+
+
+@respx.mock
+def test_a_lost_media_upload_is_a_plain_retry(x, tmp_path):
+    from apps.channels.providers import Content, MediaItem, XProvider
+
+    img = tmp_path / "a.png"
+    img.write_bytes(b"png")
+    item = MediaItem(path=img, url="https://m/a.png", mime="image/png", filename="a.png")
+    upload = respx.post(f"{xmod.API}/media/upload").mock(side_effect=httpx.ReadTimeout("read timed out"))
+    with pytest.raises(ProviderError) as exc:
+        XProvider(x).publish(Content(text="hi", media=[item]))
+    assert exc.value.retryable and not exc.value.uncertain
+    upload.mock(return_value=httpx.Response(200, json={"data": {"id": "m1"}}))
+    respx.post(f"{xmod.API}/tweets").mock(side_effect=httpx.ReadTimeout("read timed out"))
+    with pytest.raises(ProviderError) as exc:
+        XProvider(x).publish(Content(text="hi", media=[item]))
+    assert exc.value.uncertain

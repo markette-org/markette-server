@@ -10,7 +10,16 @@ import time
 
 import markdown as md
 
-from .base import BaseProvider, Candidate, Capabilities, CredentialField, Metrics, ProviderError, PublishResult
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    CredentialField,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    repeatable,
+)
 from .blogs import normalize_site
 
 NEWSLETTER_CAPS = dict(
@@ -312,6 +321,7 @@ class GhostProvider(BaseProvider):
             )
         ]
 
+    @repeatable
     def _upload(self, item):
         res = self._api(
             "POST",

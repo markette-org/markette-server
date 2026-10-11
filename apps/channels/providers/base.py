@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import logging
 import re
@@ -164,6 +165,7 @@ class BaseProvider:
     #   "lookup": find_published() reliably tells whether the earlier attempt landed.
     # None: nothing does, so a person has to check the network before it is published again.
     duplicate_guard: ClassVar[str | None] = None
+    _repeatable = 0  # > 0 inside a @repeatable step
 
     def __init__(self, channel=None):
         self.channel = channel
@@ -324,18 +326,22 @@ class BaseProvider:
             raise ProviderError(f"{self.label}: could not reach {url}: {exc}", retryable=True) from exc
         except httpx.TimeoutException as exc:
             raise ProviderError(
-                f"{self.label}: timeout calling {url}", retryable=True, uncertain=_changes(method)
+                f"{self.label}: timeout calling {url}", retryable=True, uncertain=self._changes(method)
             ) from exc
         except httpx.HTTPError as exc:
             raise ProviderError(
-                f"{self.label}: network error: {exc}", retryable=True, uncertain=_changes(method)
+                f"{self.label}: network error: {exc}", retryable=True, uncertain=self._changes(method)
             ) from exc
         if resp.status_code in expect:
             return resp
         err = self.error_from_response(resp)
-        if resp.status_code in (502, 504) and _changes(method):
+        if resp.status_code in (502, 504) and self._changes(method):
             err.uncertain = True  # a gateway lost the answer of a server that may have done the work
         raise err
+
+    def _changes(self, method):
+        """Whether repeating this request could publish something twice."""
+        return method.upper() in ("POST", "PATCH") and not self._repeatable
 
     def error_from_response(self, resp: httpx.Response) -> ProviderError:
         try:
@@ -354,9 +360,19 @@ class BaseProvider:
         return ProviderError(msg, status=status, payload=payload)
 
 
-def _changes(method):
-    """Whether repeating a request of this method could do the work twice."""
-    return method.upper() in ("POST", "PATCH")
+def repeatable(step):
+    """Marks a provider step that publishes nothing visible (a media upload, an unpublished container):
+    a lost answer there cannot have put the post online, so it is a plain retry."""
+
+    @functools.wraps(step)
+    def run(self, *args, **kwargs):
+        self._repeatable += 1
+        try:
+            return step(self, *args, **kwargs)
+        finally:
+            self._repeatable -= 1
+
+    return run
 
 
 def _short(payload, limit=500):

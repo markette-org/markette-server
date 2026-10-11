@@ -170,6 +170,8 @@ def publish_target(target_id):
         if result is None:
             sending = True  # only a lost answer from here on may have created the post
             result = provider.publish(content)
+    except CannotCheck as exc:
+        return mark_unconfirmed(target, str(exc))
     except ProviderError as exc:
         return _handle_failure(target, exc, provider, started if sending else None)
     except Exception as exc:  # noqa: BLE001 - a bug must not leave the target stuck in "publishing"
@@ -205,12 +207,21 @@ def publish_target(target_id):
     return "published"
 
 
+class CannotCheck(Exception):
+    """The network could not say whether an earlier attempt landed (e.g. missing read permission)."""
+
+
 def _earlier_copy(target, provider, content):
     """After a lost answer, the post an earlier attempt created, so it is not published twice."""
     since = (target.extra or {}).get("maybe_live_since")
     if not since or provider.duplicate_guard != "lookup":
         return None
-    found = provider.find_published(content, datetime.fromisoformat(since))
+    try:
+        found = provider.find_published(content, datetime.fromisoformat(since))
+    except ProviderError as exc:
+        if exc.retryable:
+            raise  # the network is busy: look again later
+        raise CannotCheck(f"{target.channel.name} could not be checked for the earlier attempt ({exc}).") from exc
     if found and (
         PostTarget.objects.filter(channel=target.channel, external_id=found.external_id).exclude(pk=target.pk).exists()
     ):

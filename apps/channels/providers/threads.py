@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri
+from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
 from .text import URL_RE
 
 API = "https://graph.threads.net/v1.0"
@@ -137,6 +137,7 @@ class ThreadsProvider(BaseProvider):
             time.sleep(3)
         raise ProviderError("Threads media processing timed out.", retryable=True)
 
+    @repeatable
     def _container(self, item=None, text=None, carousel_item=False, reply_to=None, link=None):
         uid = self.channel.external_id
         params = {}

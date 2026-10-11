@@ -16,6 +16,7 @@ from .base import (
     ProviderError,
     PublishResult,
     redirect_uri,
+    repeatable,
 )
 
 SCOPES = "read write"
@@ -127,6 +128,7 @@ class MastodonProvider(BaseProvider):
         return {"Authorization": f"Bearer {self.creds['access_token']}"}
 
     # --- publishing ------------------------------------------------------
+    @repeatable
     def _upload(self, item):
         resp = self.http(
             "POST",

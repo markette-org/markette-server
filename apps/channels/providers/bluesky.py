@@ -3,7 +3,16 @@
 import re
 from datetime import UTC, datetime
 
-from .base import BaseProvider, Candidate, Capabilities, CredentialField, Metrics, ProviderError, PublishResult
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    CredentialField,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    repeatable,
+)
 from .text import HASHTAG_RE, URL_RE
 
 DEFAULT_SERVICE = "https://bsky.social"
@@ -149,6 +158,7 @@ class BlueskyProvider(BaseProvider):
             )
         return facets
 
+    @repeatable
     def _upload_blob(self, item):
         if item.size > MAX_IMAGE_BYTES and not item.is_video:
             raise ProviderError(f"Bluesky images must be under 2 MB ({item.filename} is {item.size} bytes).")

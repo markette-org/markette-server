@@ -4,12 +4,26 @@ Post bodies are written in Markdown in Markette and rendered to HTML here.
 """
 
 import base64
+import html as htmllib
+import re
+from datetime import UTC, datetime
 from urllib.parse import urlparse
+from uuid import NAMESPACE_URL, uuid5
 
 import markdown as md
+from django.conf import settings
 from django.utils.text import slugify
 
-from .base import BaseProvider, Candidate, Capabilities, CredentialField, Metrics, ProviderError, PublishResult
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    CredentialField,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    repeatable,
+)
 
 BLOG_CAPS = dict(
     kind="blog",
@@ -37,6 +51,11 @@ def normalize_site(url):
     return url
 
 
+def plain_text(html):
+    """The words of an HTML body, to compare what a site stored with what was sent (images and markup aside)."""
+    return re.sub(r"\s+", " ", htmllib.unescape(re.sub(r"<[^>]+>", " ", html or ""))).strip()
+
+
 def basic_auth(user, password):
     return "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
 
@@ -52,6 +71,7 @@ def inline_images(html, media, mapping):
 class WordPressProvider(BaseProvider):
     key = "wordpress"
     label = "WordPress"
+    duplicate_guard = "lookup"
     capabilities = Capabilities(**BLOG_CAPS)
     credential_fields = [
         CredentialField("base_url", "Site URL", type="url", help="e.g. https://blog.example.com"),
@@ -106,6 +126,7 @@ class WordPressProvider(BaseProvider):
     def headers(self):
         return {"Authorization": basic_auth(self.creds["username"], self.creds["app_password"])}
 
+    @repeatable
     def _upload(self, item):
         res = self.http(
             "POST",
@@ -121,6 +142,7 @@ class WordPressProvider(BaseProvider):
             self.http("POST", f"{self.api}/media/{res['id']}", headers=self.headers, json={"alt_text": item.alt})
         return res
 
+    @repeatable
     def _terms(self, taxonomy, names):
         ids = []
         for name in names:
@@ -159,6 +181,27 @@ class WordPressProvider(BaseProvider):
         post = self.http("POST", f"{self.api}/posts", headers=self.headers, json=body).json()
         return PublishResult(external_id=str(post["id"]), url=post.get("link", ""))
 
+    def find_published(self, content, since):
+        # Your latest posts in any state, as stored (context=edit gives the raw title and body).
+        posts = self.http(
+            "GET",
+            f"{self.api}/posts",
+            headers=self.headers,
+            params={
+                "context": "edit",
+                "status": "publish,future,draft,pending,private",
+                "orderby": "date",
+                "per_page": 20,
+            },
+        ).json()
+        words = plain_text(render_html(content.text))
+        for p in posts:
+            touched = datetime.fromisoformat(p.get("modified_gmt") or "1970-01-01T00:00:00").replace(tzinfo=UTC)
+            raw = (p.get("title") or {}).get("raw", "")
+            if touched >= since and raw == content.title and plain_text((p.get("content") or {}).get("raw")) == words:
+                return PublishResult(external_id=str(p["id"]), url=p.get("link", ""))
+        return None
+
     def delete(self, external_id):
         self.http("DELETE", f"{self.api}/posts/{external_id}", headers=self.headers)
 
@@ -178,6 +221,8 @@ class WordPressProvider(BaseProvider):
 class DrupalProvider(BaseProvider):
     key = "drupal"
     label = "Drupal"
+    # Each post gets a UUID derived from its publication, so the earlier attempt can be read back.
+    duplicate_guard = "lookup"
     capabilities = Capabilities(**BLOG_CAPS)
     credential_fields = [
         CredentialField("base_url", "Site URL", type="url", help="Drupal 9+ with the JSON:API module enabled."),
@@ -245,6 +290,7 @@ class DrupalProvider(BaseProvider):
     def node_url(self):
         return f"{self.channel.base_url}/jsonapi/node/{self.channel.config.get('bundle', 'article')}"
 
+    @repeatable
     def _upload(self, item):
         field = self.channel.config.get("image_field", "field_image")
         res = self.http(
@@ -259,6 +305,7 @@ class DrupalProvider(BaseProvider):
         ).json()["data"]
         return res
 
+    @repeatable
     def _tags(self, names):
         refs = []
         url = f"{self.channel.base_url}/jsonapi/taxonomy_term/tags"
@@ -304,17 +351,39 @@ class DrupalProvider(BaseProvider):
         tags = opts.get("tags") or content.tags
         if tags and cfg.get("tags_field"):
             relationships[cfg["tags_field"]] = {"data": self._tags(tags)}
-        body = {"data": {"type": f"node--{cfg.get('bundle', 'article')}", "attributes": attributes}}
+        body = {
+            "data": {
+                "type": f"node--{cfg.get('bundle', 'article')}",
+                "id": self.node_uuid(content),
+                "attributes": attributes,
+            }
+        }
         if relationships:
             body["data"]["relationships"] = relationships
         node = self.http(
             "POST", self.node_url, json=body, headers={**self.headers, "Content-Type": "application/vnd.api+json"}
         ).json()["data"]
+        return self._result(node)
+
+    def node_uuid(self, content):
+        """Stable per publication and per Markette server (JSON:API accepts client-generated IDs)."""
+        return str(uuid5(NAMESPACE_URL, f"{settings.PUBLIC_API_URL}/{content.idempotency_key}"))
+
+    def _result(self, node):
         attrs = node.get("attributes", {})
         alias = (attrs.get("path") or {}).get("alias")
         nid = attrs.get("drupal_internal__nid")
         url = f"{self.channel.base_url}{alias}" if alias else f"{self.channel.base_url}/node/{nid}"
         return PublishResult(external_id=node["id"], url=url, extra={"nid": nid})
+
+    def find_published(self, content, since):
+        try:
+            node = self.http("GET", f"{self.node_url}/{self.node_uuid(content)}", headers=self.headers).json()["data"]
+        except ProviderError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return self._result(node)
 
     def delete(self, external_id):
         self.http("DELETE", f"{self.node_url}/{external_id}", headers=self.headers)

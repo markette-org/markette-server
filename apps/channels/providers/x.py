@@ -17,6 +17,7 @@ from .base import (
     PublishResult,
     pkce_pair,
     redirect_uri,
+    repeatable,
 )
 
 API = "https://api.x.com/2"
@@ -109,6 +110,7 @@ class XProvider(BaseProvider):
         return {"Authorization": f"Bearer {self.creds['access_token']}"}
 
     # --- publishing ------------------------------------------------------
+    @repeatable
     def _upload(self, item):
         category = "tweet_video" if item.is_video else ("tweet_gif" if item.mime == "image/gif" else "tweet_image")
         if not item.is_video:
@@ -131,6 +133,7 @@ class XProvider(BaseProvider):
             )
         return media_id
 
+    @repeatable
     def _upload_chunked(self, item, category):
         import time
 

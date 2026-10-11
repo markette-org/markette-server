@@ -17,7 +17,7 @@ import time
 
 import markdown as md
 
-from .base import BaseProvider, Candidate, Capabilities, CredentialField, ProviderError, PublishResult
+from .base import BaseProvider, Candidate, Capabilities, CredentialField, ProviderError, PublishResult, repeatable
 
 API = "https://api.weixin.qq.com/cgi-bin"
 TITLE_LIMIT = 64
@@ -130,6 +130,7 @@ class WeChatProvider(BaseProvider):
             problems.append("The WeChat cover (first image) must be a JPEG or PNG.")
         return problems
 
+    @repeatable
     def _upload_material(self, item):
         return self._call(
             "POST",
@@ -138,6 +139,7 @@ class WeChatProvider(BaseProvider):
             files={"media": (item.filename or "cover.jpg", item.read(), item.mime)},
         )["media_id"]
 
+    @repeatable
     def _upload_inline(self, item):
         return self._call(
             "POST", "media/uploadimg", files={"media": (item.filename or "image.jpg", item.read(), item.mime)}
