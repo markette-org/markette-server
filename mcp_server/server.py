@@ -113,12 +113,14 @@ mcp = MCPServer(
     name="markette",
     title="Markette",
     instructions=(
-        "Markette publishes and schedules posts to social networks (X, Bluesky, Mastodon, LinkedIn, Facebook, "
-        "Instagram) and sites (WordPress, Drupal, Medium, Hugo), and reports their metrics. Start with "
+        "Markette publishes and schedules posts to social networks (X, Bluesky, Threads, Mastodon, LinkedIn, "
+        "Facebook, Instagram, Telegram, Slack, Discord…) and sites (WordPress, Drupal, Ghost, Medium, DEV, Hugo), "
+        "and reports their metrics. Start with "
         "list_workspaces, then pass the workspace slug to the other tools. Create posts as drafts with "
         "create_post, check them with validate_post, then schedule_post. Times are ISO 8601; when the user "
         "gives a local time, use the workspace time zone returned by list_workspaces. Scheduling may return "
-        "'pending' when a team requires approval."
+        "'pending' when a team requires approval. To announce a publication elsewhere (e.g. a blog article on "
+        "X), create the announcement with follows_target_id: it waits for that publication and links to it."
     ),
     website_url=PUBLIC_API_URL,
     token_verifier=MarketteTokenVerifier(),
@@ -169,6 +171,18 @@ def _post_summary(p: dict) -> dict:
                 "url": t.get("external_url") or None,
                 "error": t.get("last_error") or None,
                 "metrics": t.get("metrics"),
+                **(
+                    {
+                        "follows": {
+                            "target_id": t["follows"],
+                            "channel": (t.get("follows_detail") or {}).get("channel_name"),
+                            "post_id": (t.get("follows_detail") or {}).get("post_id"),
+                        },
+                        "waiting": t.get("waiting", False),
+                    }
+                    if t.get("follows")
+                    else {}
+                ),
             }
             for t in p.get("targets", [])
         ],
@@ -209,19 +223,33 @@ async def create_post(
     link: str = "",
     tags: list[str] | None = None,
     channel_overrides: dict[str, str] | None = None,
+    follows_target_id: int | None = None,
+    follow_mode: Literal["delay", "queue", "best_time"] = "delay",
+    follow_delay_minutes: int = 0,
 ) -> dict:
     """Create a draft post for the given channels (nothing is published yet).
 
-    title is required for blog channels (WordPress, Drupal, Medium, Hugo); body is Markdown for them.
+    title is required for blog channels (WordPress, Drupal, Medium, Hugo, DEV); body is Markdown for them.
     channel_overrides maps a channel id to a channel-specific text (e.g. a shorter version for X).
+
+    To announce another publication (e.g. a blog article on X and Bluesky), pass its target id
+    (from get_post or list_posts) as follows_target_id: once scheduled, every channel of this post
+    waits until that publication is live, then goes out with its URL in place of {url} (and its
+    title in place of {title}); without {url} the URL is added at the end. follow_mode picks when:
+    "delay" (follow_delay_minutes after it), "queue" (next queue slot after it) or "best_time".
     """
     overrides = channel_overrides or {}
+    follow = (
+        {"follows": follows_target_id, "follow_mode": follow_mode, "follow_delay": follow_delay_minutes}
+        if follows_target_id
+        else {}
+    )
     payload = {
         "title": title,
         "body": body,
         "link": link,
         "tags": tags or [],
-        "targets": [{"channel": cid, "body": overrides.get(str(cid), "")} for cid in channel_ids],
+        "targets": [{"channel": cid, "body": overrides.get(str(cid), ""), **follow} for cid in channel_ids],
     }
     return _post_summary(await api("POST", "posts/", workspace=workspace, json=payload))
 

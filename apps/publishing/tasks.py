@@ -5,7 +5,8 @@ dispatch_due_targets (beat, every few seconds)
     → publish_target.delay(id) for each
 publish_target
     → refresh credentials → validate → provider.publish
-    → success: store id/url, schedule first metrics pull
+    → success: store id/url, schedule first metrics pull, release the publications
+      that follow this one (they link to its URL)
     → transient error: back off and let the dispatcher retry
     → auth error: flag the channel for reconnection
 """
@@ -29,6 +30,29 @@ DISPATCH_BATCH = 200
 STUCK_AFTER = timedelta(minutes=20)
 
 
+# Stands in for the URL of a publication that is not live yet, so lengths are checked realistically.
+SAMPLE_URL = "https://example.org/" + "x" * 40
+
+
+def fill_follow(text, title, link, target: PostTarget):
+    """Puts the followed publication's URL (and title) into a follower's text.
+
+    ``{url}`` and ``{title}`` (or the first line of its text) are replaced; without ``{url}`` the URL is added at the end,
+    because most networks only link what is in the text.
+    """
+    src = target.follows
+    url = src.external_url or SAMPLE_URL
+    # Untitled publications (most social posts) lend the first line of their text instead.
+    src_title = src.effective_title or next((ln.strip() for ln in src.effective_body.splitlines() if ln.strip()), "")
+    src_title = src_title[:100]
+    if "{url}" in text or "{title}" in text:
+        text = text.replace("{url}", url).replace("{title}", src_title)
+    if url not in text:
+        text = f"{text.rstrip()}\n\n{url}" if text.strip() else url
+    title = title.replace("{url}", url).replace("{title}", src_title)
+    return text, title, link or url
+
+
 def build_content(target: PostTarget) -> Content:
     media = []
     for a in target.effective_media():
@@ -45,10 +69,13 @@ def build_content(target: PostTarget) -> Content:
             )
         )
     post = target.post
+    text, title, link = target.effective_body, target.effective_title, post.link
+    if target.follows_id:
+        text, title, link = fill_follow(text, title, link, target)
     return Content(
-        text=target.effective_body,
-        title=target.effective_title,
-        link=post.link,
+        text=text,
+        title=title,
+        link=link,
         media=media,
         options=target.options or {},
         idempotency_key=f"markette-target-{target.pk}",
@@ -95,6 +122,13 @@ def dispatch_due_targets():
         t.last_error = f"Channel {t.channel.name} needs to be reconnected."
         t.save(update_fields=["status", "last_error", "updated_at"])
         t.post.refresh_status()
+    # Followers whose publication was deleted would wait forever.
+    orphans = PostTarget.objects.filter(status=TargetStatus.SCHEDULED, scheduled_at__isnull=True, follows__isnull=True)
+    for t in orphans.select_related("post"):
+        t.status = TargetStatus.FAILED
+        t.last_error = "The publication it was waiting for was deleted."
+        t.save(update_fields=["status", "last_error", "updated_at"])
+        t.post.refresh_status()
     return len(ids)
 
 
@@ -109,6 +143,12 @@ def publish_target(target_id):
         )
         if target is None or target.status != TargetStatus.QUEUED:
             return "skipped"
+        if target.follows_id and target.follows.status != TargetStatus.PUBLISHED:
+            # Retried by hand before the publication it follows: wait for it again.
+            target.status = TargetStatus.SCHEDULED
+            target.scheduled_at = None
+            target.save(update_fields=["status", "scheduled_at", "updated_at"])
+            return "waiting"
         target.status = TargetStatus.PUBLISHING
         target.attempts += 1
         target.save(update_fields=["status", "attempts", "updated_at"])
@@ -151,6 +191,10 @@ def publish_target(target_id):
     target.save()
     target.post.refresh_status()
     log.info("Published target %s on %s: %s", target.pk, channel.provider, result.url)
+    from .scheduling import release_followers
+
+    with transaction.atomic():
+        release_followers(target)
     return "published"
 
 
@@ -166,6 +210,10 @@ def _handle_failure(target, exc: ProviderError):
         target.status = TargetStatus.FAILED
     target.save(update_fields=["status", "last_error", "next_attempt_at", "updated_at"])
     target.post.refresh_status()
+    if target.status == TargetStatus.FAILED:
+        from .scheduling import note_followers
+
+        note_followers(target, f"Waiting for {target.channel.name}, which failed. Retry it to continue.")
     log.warning("Publishing target %s failed (%s): %s", target.pk, target.status, exc)
     return target.status
 

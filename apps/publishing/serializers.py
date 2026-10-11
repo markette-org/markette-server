@@ -62,6 +62,17 @@ class SlotSerializer(serializers.ModelSerializer):
 class TargetSerializer(serializers.ModelSerializer):
     channel = serializers.PrimaryKeyRelatedField(queryset=Channel.objects.all())
     channel_detail = ChannelSerializer(source="channel", read_only=True)
+    follows = serializers.PrimaryKeyRelatedField(
+        queryset=PostTarget.objects.select_related("channel", "post"), allow_null=True, required=False
+    )
+    follows_channel = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+        help_text="Follow the publication of this post on that channel (for posts not saved yet).",
+    )
+    follows_detail = serializers.SerializerMethodField()
+    waiting = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = PostTarget
@@ -85,6 +96,12 @@ class TargetSerializer(serializers.ModelSerializer):
             "extra",
             "metrics",
             "metrics_updated_at",
+            "follows",
+            "follows_channel",
+            "follows_detail",
+            "follow_mode",
+            "follow_delay",
+            "waiting",
         )
         read_only_fields = (
             "extra",
@@ -100,7 +117,48 @@ class TargetSerializer(serializers.ModelSerializer):
             "metrics",
             "metrics_updated_at",
         )
-        extra_kwargs = {"scheduled_at": {"read_only": True}}
+        extra_kwargs = {"scheduled_at": {"read_only": True}, "follow_delay": {"max_value": 60 * 24 * 30}}
+
+    def get_follows_detail(self, obj) -> dict | None:
+        src = obj.follows
+        if src is None:
+            return None
+        return {
+            "id": src.pk,
+            "post_id": src.post_id,
+            "post_title": src.post.title or (src.post.body or "")[:80],
+            "channel": src.channel_id,
+            "channel_name": src.channel.name,
+            "provider": src.channel.provider,
+            "status": src.status,
+            "external_url": src.external_url,
+        }
+
+    def validate_follows(self, src):
+        if src is None:
+            return None
+        if src.post.workspace_id != self.context["workspace"].id:
+            raise serializers.ValidationError("Unknown publication.")
+        if src.status == TargetStatus.CANCELLED:
+            raise serializers.ValidationError("That publication was cancelled.")
+        if self.instance is not None and src.pk == self.instance.pk:
+            raise serializers.ValidationError("A publication cannot wait for itself.")
+        return src
+
+    def validate(self, attrs):
+        # Editing one target directly: a channel of the same post can be named instead of a target id.
+        channel_id = attrs.pop("follows_channel", None) if self.instance is not None else None
+        if channel_id:
+            src = self.instance.post.targets.filter(channel_id=channel_id).first()
+            if src is None:
+                raise serializers.ValidationError({"follows_channel": "That channel is not part of this post."})
+            attrs["follows"] = self.validate_follows(src)
+        return attrs
+
+    def update(self, instance, validated):
+        target = super().update(instance, validated)
+        _after_follow_change(target)
+        return target
 
     def validate_channel(self, channel):
         if channel.organization_id != self.context["workspace"].organization_id:
@@ -218,8 +276,12 @@ class PostSerializer(serializers.ModelSerializer):
     def _sync_targets(self, post, targets):
         """Upsert targets by channel; targets not listed are removed unless already live."""
         keep = []
+        follow_channels = {}
         for data in targets:
             channel = data.pop("channel")
+            follows_channel = data.pop("follows_channel", None)
+            if follows_channel:
+                follow_channels[channel.pk] = follows_channel
             t = PostTarget.objects.filter(post=post, channel=channel).first()
             if t and t.status in (TargetStatus.PUBLISHED, TargetStatus.PUBLISHING, TargetStatus.QUEUED):
                 keep.append(t.pk)
@@ -230,6 +292,18 @@ class PostSerializer(serializers.ModelSerializer):
                 setattr(t, k, v)
             t.save()
             keep.append(t.pk)
+        # Followers of another channel of this post, now that every target exists.
+        for channel_id, src_channel in follow_channels.items():
+            t = post.targets.get(channel_id=channel_id)
+            src = post.targets.filter(channel_id=src_channel).first()
+            if src is None or src.pk == t.pk:
+                raise serializers.ValidationError(
+                    {"targets": f"{t.channel.name} waits for a channel that is not part of this post."}
+                )
+            t.follows = src
+            t.save(update_fields=["follows", "updated_at"])
+        for t in post.targets.filter(pk__in=keep).select_related("channel", "follows"):
+            _after_follow_change(t)
         stale = post.targets.exclude(pk__in=keep).exclude(
             status__in=(TargetStatus.PUBLISHED, TargetStatus.PUBLISHING, TargetStatus.QUEUED)
         )
@@ -263,6 +337,22 @@ class PostSerializer(serializers.ModelSerializer):
             self._sync_targets(post, targets)
         post.refresh_status()
         return post
+
+
+def _after_follow_change(target):
+    """Keeps a target consistent after its ``follows`` changed."""
+    from rest_framework.exceptions import ValidationError
+
+    from .scheduling import check_follow_chain
+
+    try:
+        check_follow_chain(target)
+    except ValidationError as exc:
+        raise serializers.ValidationError(exc.detail) from exc
+    if target.status == TargetStatus.SCHEDULED and target.scheduled_at is None and target.follows_id is None:
+        # Was waiting for a publication it no longer follows: back to draft.
+        target.status = TargetStatus.DRAFT
+        target.save(update_fields=["status", "updated_at"])
 
 
 class ScheduleSerializer(serializers.Serializer):

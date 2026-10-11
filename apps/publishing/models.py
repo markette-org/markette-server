@@ -157,8 +157,19 @@ class TargetStatus(models.TextChoices):
     CANCELLED = "cancelled", "Cancelled"
 
 
+class FollowMode(models.TextChoices):
+    DELAY = "delay", "After a delay"
+    QUEUE = "queue", "Next queue slot"
+    BEST_TIME = "best_time", "Best time"
+
+
 class PostTarget(TimeStamped):
-    """One post on one channel, with its own copy, time, outcome and metrics."""
+    """One post on one channel, with its own copy, time, outcome and metrics.
+
+    A target can *follow* another publication (in this post or another one of the
+    workspace): it waits until that one is published, then goes out with its URL in
+    place of ``{url}`` (see ``scheduling.release_followers``).
+    """
 
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="targets")
     channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name="targets")
@@ -182,6 +193,11 @@ class PostTarget(TimeStamped):
     # Provider extras, e.g. {"first_comment_id": "..."}.
     extra = models.JSONField(default=dict, blank=True)
 
+    # Waits for this publication and links to it (e.g. announce a blog post on X and Bluesky).
+    follows = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="followers")
+    follow_mode = models.CharField(max_length=16, choices=FollowMode.choices, default=FollowMode.DELAY)
+    follow_delay = models.PositiveIntegerField(default=0, help_text="Minutes after the followed publication.")
+
     # Latest metrics, denormalised from analytics.MetricSnapshot for fast listing.
     metrics = models.JSONField(default=dict, blank=True)
     metrics_updated_at = models.DateTimeField(null=True, blank=True)
@@ -202,6 +218,11 @@ class PostTarget(TimeStamped):
     @property
     def effective_title(self):
         return self.title or self.post.title
+
+    @property
+    def waiting(self):
+        """Scheduled, but waiting for the publication it follows."""
+        return self.status == TargetStatus.SCHEDULED and self.scheduled_at is None and self.follows_id is not None
 
     def effective_media(self):
         if self.media_ids is None:

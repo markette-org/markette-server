@@ -115,6 +115,8 @@ class PostViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
     queryset = Post.objects.select_related("author").prefetch_related(
         "postmedia_set__asset",
         "targets__channel",
+        "targets__follows__channel",
+        "targets__follows__post",
     )
     serializer_class = PostSerializer
     filterset_fields = ("campaign",)
@@ -214,7 +216,13 @@ class PostViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def retry(self, request, pk=None):
         post = self.get_object()
-        post.targets.filter(status=TargetStatus.FAILED, channel__status="active").update(
+        failed = post.targets.filter(status=TargetStatus.FAILED, channel__status="active")
+        # Followers whose publication is not live yet go back to waiting for it.
+        waiting = failed.filter(follows__isnull=False).exclude(follows__status=TargetStatus.PUBLISHED)
+        waiting.update(
+            status=TargetStatus.SCHEDULED, scheduled_at=None, next_attempt_at=None, attempts=0, last_error=""
+        )
+        failed.update(
             status=TargetStatus.SCHEDULED,
             scheduled_at=timezone.now(),
             next_attempt_at=None,
@@ -252,10 +260,19 @@ class PostViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
                     title=t.title,
                     media_ids=t.media_ids,
                     options=t.options,
+                    # A follower of another post keeps following it; within the post it is re-linked below.
+                    follows_id=t.follows_id if t.follows and t.follows.post_id != src.pk else None,
+                    follow_mode=t.follow_mode,
+                    follow_delay=t.follow_delay,
                 )
-                for t in src.targets.all()
+                for t in src.targets.select_related("follows")
             ]
         )
+        by_channel = {t.channel_id: t for t in copy.targets.all()}
+        for t in src.targets.select_related("follows"):
+            if t.follows and t.follows.post_id == src.pk and t.follows.channel_id in by_channel:
+                by_channel[t.channel_id].follows = by_channel[t.follows.channel_id]
+                by_channel[t.channel_id].save(update_fields=["follows"])
         return Response(
             PostSerializer(self.get_queryset().get(pk=copy.pk), context=self.get_serializer_context()).data,
             status=status.HTTP_201_CREATED,
@@ -313,6 +330,9 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
         target.status = TargetStatus.CANCELLED
         target.save(update_fields=["status", "updated_at"])
         target.post.refresh_status()
+        scheduling.note_followers(
+            target, f"{target.channel.name} was cancelled, so there is nothing to link to.", fail=True
+        )
         return Response(TargetSerializer(target, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="delete-remote")
