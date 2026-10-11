@@ -836,6 +836,7 @@ paths:
           enum:
           - bluesky
           - brevo
+          - devto
           - discord
           - drupal
           - facebook
@@ -880,6 +881,7 @@ paths:
           * `wordpress` - WordPress
           * `drupal` - Drupal
           * `medium` - Medium
+          * `devto` - DEV
           * `hugo` - Hugo (git)
       - name: search
         required: false
@@ -6570,6 +6572,7 @@ components:
       - wordpress
       - drupal
       - medium
+      - devto
       - hugo
       type: string
       description: |-
@@ -6595,6 +6598,7 @@ components:
         * `wordpress` - WordPress
         * `drupal` - Drupal
         * `medium` - Medium
+        * `devto` - DEV
         * `hugo` - Hugo (git)
     RegisterRequest:
       type: object

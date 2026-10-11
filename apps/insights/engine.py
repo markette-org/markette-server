@@ -143,6 +143,7 @@ PRIORS = {
     "wordpress": (_READING, "reading"),
     "drupal": (_READING, "reading"),
     "medium": (_READING, "reading"),
+    "devto": (_READING, "reading"),
     "hugo": (_READING, "reading"),
 }
 

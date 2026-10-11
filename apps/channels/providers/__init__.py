@@ -1,6 +1,7 @@
 from .base import BaseProvider, Candidate, Capabilities, Content, MediaItem, Metrics, ProviderError, PublishResult
 from .blogs import DrupalProvider, WordPressProvider
 from .bluesky import BlueskyProvider
+from .devto import DevtoProvider
 from .discord import DiscordProvider
 from .hugo import HugoProvider
 from .linkedin import LinkedInProvider
@@ -40,6 +41,7 @@ REGISTRY: dict[str, type[BaseProvider]] = {
         WordPressProvider,
         DrupalProvider,
         MediumProvider,
+        DevtoProvider,
         GhostProvider,
         HugoProvider,
         BrevoProvider,

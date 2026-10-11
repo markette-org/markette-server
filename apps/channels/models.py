@@ -34,6 +34,7 @@ class Provider(models.TextChoices):
     WORDPRESS = "wordpress", "WordPress"
     DRUPAL = "drupal", "Drupal"
     MEDIUM = "medium", "Medium"
+    DEVTO = "devto", "DEV"
     HUGO = "hugo", "Hugo (git)"
 
 
