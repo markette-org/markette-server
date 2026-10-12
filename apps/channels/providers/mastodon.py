@@ -13,12 +13,14 @@ from .base import (
     Candidate,
     Capabilities,
     CredentialField,
+    InboxEntry,
     Metrics,
     ProviderError,
     PublishResult,
     redirect_uri,
     repeatable,
 )
+from .text import html_to_text, parse_time
 
 SCOPES = "read write"
 
@@ -46,6 +48,8 @@ class MastodonProvider(BaseProvider):
         max_media=4,
         supports_threads=True,
         supports_edit=True,
+        inbox=True,
+        inbox_reply=True,
         instance_url=True,
         metric_names=("likes", "comments", "shares"),
     )
@@ -177,6 +181,50 @@ class MastodonProvider(BaseProvider):
         if lang := content.options.get("language"):
             data["language"] = lang
         self.http("PUT", f"{self.base}/api/v1/statuses/{external_id}", headers=self.headers, json=data)
+
+    # --- inbox ---------------------------------------------------------
+    def fetch_inbox(self, state, recent_posts):
+        params = {"types[]": ["mention"], "limit": 40}
+        if state.get("since_id"):
+            params["since_id"] = state["since_id"]
+        notes = self.http("GET", f"{self.base}/api/v1/notifications", headers=self.headers, params=params).json()
+        entries = []
+        for n in notes:
+            st = n.get("status") or {}
+            acct = st.get("account") or n.get("account") or {}
+            if not st:
+                continue
+            entries.append(
+                InboxEntry(
+                    external_id=st["id"],
+                    kind="reply" if st.get("in_reply_to_id") else "mention",
+                    text=html_to_text(st.get("content")),
+                    url=st.get("url") or st.get("uri", ""),
+                    author_name=acct.get("display_name") or acct.get("username", ""),
+                    author_handle="@" + acct.get("acct", ""),
+                    author_avatar=acct.get("avatar", ""),
+                    author_url=acct.get("url", ""),
+                    created_at=parse_time(st.get("created_at")),
+                    post_external_id=st.get("in_reply_to_id") or "",
+                    context={"acct": acct.get("acct", ""), "visibility": st.get("visibility", "public")},
+                )
+            )
+        if notes:
+            state = {**state, "since_id": max((n["id"] for n in notes), key=lambda i: (len(i), i))}
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        mention = "@" + entry.context.get("acct", "")
+        if mention != "@" and mention.lower() not in text.lower():
+            text = f"{mention} {text}"
+        visibility = entry.context.get("visibility", "public")
+        data = {
+            "status": text,
+            "in_reply_to_id": entry.external_id,
+            "visibility": visibility if visibility in ("direct", "private", "unlisted") else "public",
+        }
+        status = self.http("POST", f"{self.base}/api/v1/statuses", headers=self.headers, json=data).json()
+        return PublishResult(external_id=status["id"], url=status.get("url") or "")
 
     def publish_reply(self, content, parent, root):
         return self.publish(replace(content, options={**content.options, "_in_reply_to_id": parent.external_id}))

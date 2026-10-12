@@ -13,14 +13,24 @@ errors, which Markette shows on the publication.
 
 import re
 import time
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlsplit
 
 from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    InboxEntry,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    redirect_uri,
+    repeatable,
+)
 from .text import URL_RE
 
 AUTHORIZE = "https://www.reddit.com/api/v1/authorize"
@@ -60,6 +70,9 @@ class RedditProvider(BaseProvider):
         supports_title=True,
         supports_first_comment=True,
         first_comment_max=10000,
+        inbox=True,
+        inbox_interval=10,
+        inbox_reply=True,
         metric_names=("likes", "comments", "shares"),
     )
 
@@ -410,6 +423,41 @@ class RedditProvider(BaseProvider):
         if post is None:
             raise ProviderError("Reddit accepted the image post but did not confirm it; check the subreddit.")
         return PublishResult(external_id=post["name"], url=f"https://www.reddit.com{post['permalink']}")
+
+    def fetch_inbox(self, state, recent_posts):
+        me = (self.channel.config.get("username") or "").lower()
+        entries = []
+        for fullname in recent_posts[:10]:
+            listing = self.api("GET", f"/comments/{fullname.removeprefix('t3_')}", params={"sort": "new", "limit": 50})
+            stack = list(((listing[1] if len(listing) > 1 else {}).get("data") or {}).get("children") or [])
+            while stack:
+                node = stack.pop()
+                if node.get("kind") != "t1":
+                    continue
+                c = node.get("data") or {}
+                replies = c.get("replies")
+                if isinstance(replies, dict):
+                    stack.extend((replies.get("data") or {}).get("children") or [])
+                if (c.get("author") or "").lower() in (me, "[deleted]", "automoderator"):
+                    continue
+                entries.append(
+                    InboxEntry(
+                        external_id=c["name"],
+                        kind="comment",
+                        text=c.get("body", ""),
+                        url=f"https://www.reddit.com{c.get('permalink', '')}",
+                        author_name=c.get("author", ""),
+                        author_handle="u/" + c.get("author", ""),
+                        author_url=f"https://www.reddit.com/user/{c.get('author', '')}",
+                        created_at=datetime.fromtimestamp(c.get("created_utc") or 0, tz=UTC),
+                        post_external_id=fullname,
+                    )
+                )
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        name = self.post_first_comment(entry.external_id, text)
+        return PublishResult(external_id=name, url="")
 
     def post_first_comment(self, external_id, text):
         resp = self.api("POST", "/api/comment", data={"api_type": "json", "thing_id": external_id, "text": text})

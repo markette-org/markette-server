@@ -11,6 +11,7 @@ from apps.analytics.views import AnalyticsViewSet
 from apps.channels import webhooks as channel_webhooks
 from apps.channels.views import ChannelViewSet, oauth_callback, providers
 from apps.core import views as core_views
+from apps.inbox.views import InboxViewSet
 from apps.insights.views import InsightsViewSet
 from apps.links.views import follow as follow_short_link
 from apps.notifications.views import DestinationViewSet
@@ -52,6 +53,7 @@ router.register("analytics", AnalyticsViewSet, basename="analytics")
 router.register("reports", ReportViewSet, basename="report")
 router.register("insights", InsightsViewSet, basename="insights")
 router.register("notifications", DestinationViewSet, basename="notification")
+router.register("inbox", InboxViewSet, basename="inbox")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

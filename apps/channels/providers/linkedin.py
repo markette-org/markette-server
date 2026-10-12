@@ -1,14 +1,24 @@
 """LinkedIn members and organization pages via the versioned REST Posts API."""
 
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlencode
 
 from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    InboxEntry,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    redirect_uri,
+    repeatable,
+)
 
 AUTHORIZE = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -23,6 +33,10 @@ class LinkedInProvider(BaseProvider):
     capabilities = Capabilities(
         max_chars=3000,
         supports_edit=True,
+        # Comments on company page posts (organization scopes); personal profiles cannot read them.
+        inbox=True,
+        inbox_interval=15,
+        inbox_reply=True,
         max_media=9,
         supports_first_comment=True,
         first_comment_max=1250,
@@ -261,6 +275,47 @@ class LinkedInProvider(BaseProvider):
             f"{REST}/posts/{quote(external_id, safe='')}",
             headers={**self.headers, "X-RestLi-Method": "PARTIAL_UPDATE"},
             json={"patch": {"$set": {"commentary": _escape_little_text(content.text)}}},
+        )
+
+    def fetch_inbox(self, state, recent_posts):
+        if not self.author.startswith("urn:li:organization:"):
+            return [], state
+        entries = []
+        for urn in recent_posts[:10]:
+            res = self.http(
+                "GET",
+                f"{REST}/socialActions/{quote(urn, safe='')}/comments",
+                headers=self.headers,
+                params={"count": 50},
+            ).json()
+            for c in res.get("elements", []):
+                if c.get("actor") == self.author:
+                    continue
+                cid = c.get("commentUrn") or c.get("$URN") or f"urn:li:comment:({urn},{c.get('id')})"
+                entries.append(
+                    InboxEntry(
+                        external_id=cid,
+                        kind="comment",
+                        text=(c.get("message") or {}).get("text", ""),
+                        url=f"https://www.linkedin.com/feed/update/{urn}/",
+                        author_name=c.get("actor", ""),
+                        created_at=datetime.fromtimestamp(((c.get("created") or {}).get("time") or 0) / 1000, tz=UTC),
+                        post_external_id=urn,
+                        context={"object": urn},
+                    )
+                )
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        obj = entry.context.get("object", "")
+        resp = self.http(
+            "POST",
+            f"{REST}/socialActions/{quote(entry.external_id, safe='')}/comments",
+            headers=self.headers,
+            json={"actor": self.author, "object": obj, "parentComment": entry.external_id, "message": {"text": text}},
+        )
+        return PublishResult(
+            external_id=resp.headers.get("x-restli-id", ""), url=f"https://www.linkedin.com/feed/update/{obj}/"
         )
 
     def post_first_comment(self, external_id, text):

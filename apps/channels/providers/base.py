@@ -66,6 +66,11 @@ class Capabilities:
     supports_threads: bool = False
     # A published post's text (and title) can be changed through the API.
     supports_edit: bool = False
+    # Replies, mentions and comments are collected into the inbox (every inbox_interval minutes)…
+    inbox: bool = False
+    inbox_interval: int = 5
+    # …and can be answered from Markette.
+    inbox_reply: bool = False
 
 
 @dataclass
@@ -98,6 +103,23 @@ class Content:
     options: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
     tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class InboxEntry:
+    """A reply, mention or comment someone left for this channel."""
+
+    external_id: str
+    kind: str  # reply | mention | comment | quote
+    text: str
+    url: str = ""
+    author_name: str = ""
+    author_handle: str = ""
+    author_avatar: str = ""
+    author_url: str = ""
+    created_at: datetime | None = None
+    post_external_id: str = ""  # our post it answers, to link it to the publication
+    context: dict[str, Any] = field(default_factory=dict)  # what reply_inbox needs
 
 
 @dataclass
@@ -208,6 +230,8 @@ class BaseProvider:
             "first_comment_max": caps.first_comment_max,
             "supports_threads": caps.supports_threads,
             "supports_edit": caps.supports_edit,
+            "inbox": caps.inbox,
+            "inbox_reply": caps.inbox_reply,
         }
 
     # --- connection ------------------------------------------------------
@@ -328,6 +352,19 @@ class BaseProvider:
     def find_published(self, content: Content, since: datetime) -> PublishResult | None:
         """The post an earlier attempt created for ``content`` since ``since``, if it landed (duplicate_guard "lookup")."""
         return None
+
+    # --- inbox -------------------------------------------------------------
+    def fetch_inbox(self, state: dict, recent_posts: list[str]) -> tuple[list[InboxEntry], dict]:
+        """New replies/mentions/comments since ``state`` (newest first is fine), and the state to keep.
+
+        ``recent_posts`` are the external ids of this channel's recent publications, for networks
+        that can only list comments per post.
+        """
+        return [], state
+
+    def reply_inbox(self, entry: InboxEntry, text: str) -> PublishResult:
+        """Answers ``entry`` publicly on the network."""
+        raise ProviderError(f"Replying on {self.label} from Markette is not supported.")
 
     def update(self, external_id: str, content: Content, extra: dict) -> dict | None:
         """Changes a published post to ``content`` (text and title; media stay as they are).

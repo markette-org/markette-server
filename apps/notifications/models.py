@@ -19,6 +19,7 @@ class Event(models.TextChoices):
     APPROVAL_REQUESTED = "approval.requested", "A post waits for approval"
     APPROVED = "approval.approved", "A post was approved"
     CHANGES_REQUESTED = "approval.changes_requested", "Changes were requested on a post"
+    INBOX = "inbox.new", "New replies, mentions or comments"
     DIGEST = "digest.daily", "Daily summary (8:00 in the workspace's time zone)"
 
 

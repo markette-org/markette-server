@@ -130,6 +130,12 @@ def render(payload):
         subject = f"Changes requested on {title}"
         if data.get("by"):
             lines.append(f"{data['by']}: {data.get('comment', '')}")
+    elif event == Event.INBOX:
+        n = data.get("count", 0)
+        subject = f"{n} new {'reply or comment' if n == 1 else 'replies and comments'} on {channel}"
+        for i in data.get("items") or []:
+            lines.append(f"{i.get('author', '')}: {i.get('text', '')}")
+        link = app_url("/inbox")
     elif event == Event.DIGEST:
         subject = f"Today in {payload['workspace']['name']}"
         lines.extend(data.get("lines") or [])

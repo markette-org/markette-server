@@ -1513,6 +1513,152 @@ paths:
               schema:
                 $ref: '#/components/schemas/Channel'
           description: ''
+  /api/inbox/:
+    get:
+      operationId: inbox_list
+      description: Replies, mentions and comments on the organization's channels this
+        member can use.
+      parameters:
+      - in: query
+        name: channel
+        schema:
+          type: integer
+      - in: query
+        name: kind
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - inbox
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedInboxItemList'
+          description: ''
+  /api/inbox/{id}/:
+    get:
+      operationId: inbox_retrieve
+      description: Replies, mentions and comments on the organization's channels this
+        member can use.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this inbox item.
+        required: true
+      tags:
+      - inbox
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxItem'
+          description: ''
+  /api/inbox/{id}/reply/:
+    post:
+      operationId: inbox_reply_create
+      description: Replies, mentions and comments on the organization's channels this
+        member can use.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this inbox item.
+        required: true
+      tags:
+      - inbox
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxItem'
+          description: ''
+  /api/inbox/mark/:
+    post:
+      operationId: inbox_mark_create
+      description: '{"ids": [...], "status": "read" | "done" | "new"}'
+      tags:
+      - inbox
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxItem'
+          description: ''
+  /api/inbox/refresh/:
+    post:
+      operationId: inbox_refresh_create
+      description: Polls the member's channels now (in the background).
+      tags:
+      - inbox
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxItem'
+          description: ''
+  /api/inbox/summary/:
+    get:
+      operationId: inbox_summary_retrieve
+      description: Unread count (for the menu badge) and each channel's polling state.
+      tags:
+      - inbox
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxItem'
+          description: ''
   /api/insights/adapt/:
     post:
       operationId: insights_adapt_create
@@ -6437,6 +6583,7 @@ components:
       - approval.requested
       - approval.approved
       - approval.changes_requested
+      - inbox.new
       - digest.daily
       type: string
       description: |-
@@ -6448,6 +6595,7 @@ components:
         * `approval.requested` - A post waits for approval
         * `approval.approved` - A post was approved
         * `approval.changes_requested` - Changes were requested on a post
+        * `inbox.new` - New replies, mentions or comments
         * `digest.daily` - Daily summary (8:00 in the workspace's time zone)
     FollowModeEnum:
       enum:
@@ -6468,6 +6616,115 @@ components:
         * `` - Not emailed
         * `weekly` - Every Monday
         * `monthly` - On the 1st of the month
+    InboxItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        channel:
+          type: integer
+          readOnly: true
+        channel_name:
+          type: string
+          readOnly: true
+        provider:
+          type: string
+          readOnly: true
+        kind:
+          type: string
+          readOnly: true
+        text:
+          type: string
+          readOnly: true
+        url:
+          type: string
+          format: uri
+          readOnly: true
+        author_name:
+          type: string
+          readOnly: true
+        author_handle:
+          type: string
+          readOnly: true
+        author_avatar:
+          type: string
+          format: uri
+          readOnly: true
+        author_url:
+          type: string
+          format: uri
+          readOnly: true
+        remote_created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        target:
+          type: integer
+          readOnly: true
+          nullable: true
+        post:
+          type: integer
+          readOnly: true
+        post_title:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/InboxItemStatusEnum'
+          readOnly: true
+        reply_text:
+          type: string
+          readOnly: true
+        reply_url:
+          type: string
+          format: uri
+          readOnly: true
+        replied_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        replied_by_name:
+          type: string
+          nullable: true
+          readOnly: true
+        can_reply:
+          type: boolean
+          readOnly: true
+      required:
+      - author_avatar
+      - author_handle
+      - author_name
+      - author_url
+      - can_reply
+      - channel
+      - channel_name
+      - id
+      - kind
+      - post
+      - post_title
+      - provider
+      - remote_created_at
+      - replied_at
+      - replied_by_name
+      - reply_text
+      - reply_url
+      - status
+      - target
+      - text
+      - url
+    InboxItemStatusEnum:
+      enum:
+      - new
+      - read
+      - done
+      type: string
+      description: |-
+        * `new` - New
+        * `read` - Read
+        * `done` - Done
     Invitation:
       type: object
       properties:
@@ -6748,6 +7005,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Channel'
+    PaginatedInboxItemList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/InboxItem'
     PaginatedInvitationList:
       type: object
       required:
@@ -8392,6 +8672,9 @@ tags:
   description: Metrics per post, channel and period.
 - name: insights
   description: Best times to post and AI assistance.
+- name: inbox
+  description: Replies, mentions and comments from the networks; answer them from
+    here.
 - name: notifications
   description: 'Where the workspace hears about publications and problems: email,
     a Telegram bot, signed webhooks (admins only).'

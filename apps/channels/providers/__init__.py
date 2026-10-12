@@ -1,4 +1,14 @@
-from .base import BaseProvider, Candidate, Capabilities, Content, MediaItem, Metrics, ProviderError, PublishResult
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    Content,
+    InboxEntry,
+    MediaItem,
+    Metrics,
+    ProviderError,
+    PublishResult,
+)
 from .blogs import DrupalProvider, WordPressProvider
 from .bluesky import BlueskyProvider
 from .devto import DevtoProvider
@@ -65,6 +75,7 @@ __all__ = [
     "Candidate",
     "Capabilities",
     "Content",
+    "InboxEntry",
     "MediaItem",
     "Metrics",
     "ProviderError",

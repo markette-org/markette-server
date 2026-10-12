@@ -8,13 +8,15 @@ from .base import (
     BaseProvider,
     Candidate,
     Capabilities,
+    Content,
     CredentialField,
+    InboxEntry,
     Metrics,
     ProviderError,
     PublishResult,
     repeatable,
 )
-from .text import HASHTAG_RE, URL_RE
+from .text import HASHTAG_RE, URL_RE, parse_time
 
 DEFAULT_SERVICE = "https://bsky.social"
 APPVIEW = "https://public.api.bsky.app"
@@ -35,6 +37,8 @@ class BlueskyProvider(BaseProvider):
         count_mode="graphemes",
         max_media=4,
         supports_threads=True,
+        inbox=True,
+        inbox_reply=True,
         auth="credentials",
         metric_names=("likes", "comments", "shares"),
     )
@@ -212,6 +216,51 @@ class BlueskyProvider(BaseProvider):
 
         reply = {"root": ref(root), "parent": ref(parent)}
         return self.publish(replace(content, options={**content.options, "_reply": reply}))
+
+    # --- inbox ---------------------------------------------------------
+    def fetch_inbox(self, state, recent_posts):
+        res = self._xrpc(
+            "GET",
+            "app.bsky.notification.listNotifications",
+            params={"limit": 50, "reasons": ["reply", "mention", "quote"]},
+        ).json()
+        seen = state.get("seen_at") or ""
+        entries, newest = [], seen
+        for n in res.get("notifications", []):
+            at = n.get("indexedAt") or ""
+            newest = max(newest, at)
+            if seen and at <= seen or n.get("reason") not in ("reply", "mention", "quote"):
+                continue
+            rec = n.get("record") or {}
+            author = n.get("author") or {}
+            rkey = n["uri"].rsplit("/", 1)[-1]
+            parent = ((rec.get("reply") or {}).get("parent") or {}).get("uri", "")
+            quoted = ((rec.get("embed") or {}).get("record") or {}).get("uri", "")
+            entries.append(
+                InboxEntry(
+                    external_id=n["uri"],
+                    kind=n["reason"],
+                    text=rec.get("text", ""),
+                    url=f"https://bsky.app/profile/{author.get('handle', author.get('did', ''))}/post/{rkey}",
+                    author_name=author.get("displayName") or author.get("handle", ""),
+                    author_handle="@" + author.get("handle", ""),
+                    author_avatar=author.get("avatar", ""),
+                    author_url=f"https://bsky.app/profile/{author.get('handle', '')}",
+                    created_at=parse_time(rec.get("createdAt") or at),
+                    post_external_id=parent or quoted,
+                    context={
+                        "uri": n["uri"],
+                        "cid": n.get("cid"),
+                        "root": (rec.get("reply") or {}).get("root") or {"uri": n["uri"], "cid": n.get("cid")},
+                    },
+                )
+            )
+        return entries, {**state, "seen_at": newest}
+
+    def reply_inbox(self, entry, text):
+        ctx = entry.context
+        reply = {"root": ctx["root"], "parent": {"uri": ctx["uri"], "cid": ctx["cid"]}}
+        return self.publish(Content(text=text, options={"_reply": reply}))
 
     def _result(self, uri, cid):
         rkey = uri.rsplit("/", 1)[-1]

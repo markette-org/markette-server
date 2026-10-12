@@ -126,6 +126,7 @@ TAGS = [
     {"name": "teams", "description": "Publishing teams: channel access and approval."},
     {"name": "analytics", "description": "Metrics per post, channel and period."},
     {"name": "insights", "description": "Best times to post and AI assistance."},
+    {"name": "inbox", "description": "Replies, mentions and comments from the networks; answer them from here."},
     {
         "name": "notifications",
         "description": "Where the workspace hears about publications and problems: email, a Telegram bot, "

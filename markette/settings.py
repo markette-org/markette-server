@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "apps.sso",
     "apps.notifications",
     "apps.links",
+    "apps.inbox",
 ]
 
 MIDDLEWARE = [
@@ -222,6 +223,10 @@ CELERY_BEAT_SCHEDULE = {
     "refresh-expiring-tokens": {
         "task": "apps.channels.tasks.refresh_expiring_tokens",
         "schedule": 600.0,
+    },
+    "poll-inboxes": {
+        "task": "apps.inbox.tasks.poll_inboxes",
+        "schedule": 120.0,
     },
     "retry-notifications": {
         "task": "apps.notifications.tasks.retry_due_deliveries",

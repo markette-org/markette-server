@@ -8,7 +8,17 @@ articles; "delete" unpublishes them (they go back to drafts).
 
 import re
 
-from .base import BaseProvider, Candidate, Capabilities, CredentialField, Metrics, ProviderError, PublishResult
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    CredentialField,
+    InboxEntry,
+    Metrics,
+    ProviderError,
+    PublishResult,
+)
+from .text import html_to_text, parse_time
 
 DEFAULT_BASE = "https://dev.to"
 ACCEPT = "application/vnd.forem.api-v1+json"
@@ -37,6 +47,9 @@ class DevtoProvider(BaseProvider):
         supports_video=False,
         supports_title=True,
         supports_edit=True,
+        # Forem's API lists comments but cannot post them: the inbox links to the article to answer.
+        inbox=True,
+        inbox_interval=15,
         metric_names=("impressions", "likes", "comments"),
         auth="credentials",
     )
@@ -178,6 +191,34 @@ class DevtoProvider(BaseProvider):
         article.pop("organization_id", None)
         article.pop("published", None)  # keep it published (or a draft) as it is
         self.http("PUT", f"{self.base}/api/articles/{external_id}", headers=self._headers(), json={"article": article})
+
+    def fetch_inbox(self, state, recent_posts):
+        me = (self.channel.config.get("username") or "").lower()
+        entries = []
+        for aid in recent_posts[:10]:
+            tree = self.http("GET", f"{self.base}/api/comments", headers=self._headers(), params={"a_id": aid}).json()
+            stack = list(tree)
+            while stack:
+                c = stack.pop()
+                stack.extend(c.get("children") or [])
+                user = c.get("user") or {}
+                if (user.get("username") or "").lower() == me:
+                    continue
+                entries.append(
+                    InboxEntry(
+                        external_id=c["id_code"],
+                        kind="comment",
+                        text=html_to_text(c.get("body_html", "")),
+                        url=f"{self.base}/{user.get('username', '')}/comment/{c['id_code']}",
+                        author_name=user.get("name") or user.get("username", ""),
+                        author_handle="@" + user.get("username", ""),
+                        author_avatar=user.get("profile_image_90", ""),
+                        author_url=f"{self.base}/{user.get('username', '')}",
+                        created_at=parse_time(c.get("created_at")),
+                        post_external_id=str(aid),
+                    )
+                )
+        return entries, state
 
     def find_published(self, content, since):
         # Your articles, drafts included, newest first. Forem gives no creation time, so the

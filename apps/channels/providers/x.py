@@ -13,6 +13,7 @@ from .base import (
     Candidate,
     Capabilities,
     Content,
+    InboxEntry,
     Metrics,
     ProviderError,
     PublishResult,
@@ -20,6 +21,7 @@ from .base import (
     redirect_uri,
     repeatable,
 )
+from .text import parse_time
 
 API = "https://api.x.com/2"
 AUTHORIZE = "https://x.com/i/oauth2/authorize"
@@ -35,6 +37,10 @@ class XProvider(BaseProvider):
         count_mode="x",
         max_media=4,
         supports_threads=True,
+        # Mentions need X's paid API access; the free tier answers 403 and the inbox says so.
+        inbox=True,
+        inbox_interval=15,
+        inbox_reply=True,
         metric_names=("impressions", "likes", "comments", "shares", "saves"),
     )
 
@@ -184,6 +190,43 @@ class XProvider(BaseProvider):
         data = self.http("POST", f"{API}/tweets", headers=self.headers, json=body).json()["data"]
         username = (self.channel.handle or "i").lstrip("@")
         return PublishResult(external_id=data["id"], url=f"https://x.com/{username}/status/{data['id']}")
+
+    def fetch_inbox(self, state, recent_posts):
+        params = {
+            "max_results": 50,
+            "expansions": "author_id",
+            "tweet.fields": "created_at,referenced_tweets",
+            "user.fields": "name,username,profile_image_url",
+        }
+        if state.get("since_id"):
+            params["since_id"] = state["since_id"]
+        res = self.http(
+            "GET", f"{API}/users/{self.channel.external_id}/mentions", headers=self.headers, params=params
+        ).json()
+        users = {u["id"]: u for u in (res.get("includes") or {}).get("users", [])}
+        entries = []
+        for t in res.get("data", []):
+            u = users.get(t.get("author_id"), {})
+            replied = next((r["id"] for r in t.get("referenced_tweets") or [] if r.get("type") == "replied_to"), "")
+            entries.append(
+                InboxEntry(
+                    external_id=t["id"],
+                    kind="reply" if replied else "mention",
+                    text=t.get("text", ""),
+                    url=f"https://x.com/{u.get('username', 'i')}/status/{t['id']}",
+                    author_name=u.get("name", ""),
+                    author_handle="@" + u.get("username", ""),
+                    author_avatar=u.get("profile_image_url", ""),
+                    author_url=f"https://x.com/{u.get('username', '')}",
+                    created_at=parse_time(t.get("created_at")),
+                    post_external_id=replied,
+                )
+            )
+        newest = (res.get("meta") or {}).get("newest_id")
+        return entries, ({**state, "since_id": newest} if newest else state)
+
+    def reply_inbox(self, entry, text):
+        return self.publish(Content(text=text, options={"reply_to_id": entry.external_id}))
 
     def publish_reply(self, content, parent, root):
         return self.publish(replace(content, options={**content.options, "reply_to_id": parent.external_id}))

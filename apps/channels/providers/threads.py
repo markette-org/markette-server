@@ -13,12 +13,22 @@ from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
-from .text import URL_RE
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    InboxEntry,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    redirect_uri,
+    repeatable,
+)
+from .text import URL_RE, parse_time
 
 API = "https://graph.threads.net/v1.0"
 AUTHORIZE = "https://threads.com/oauth/authorize"
-SCOPES = "threads_basic,threads_content_publish,threads_manage_insights,threads_manage_replies"
+SCOPES = "threads_basic,threads_content_publish,threads_manage_insights,threads_manage_replies,threads_read_replies"
 MAX_LINKS = 5
 
 
@@ -30,6 +40,9 @@ class ThreadsProvider(BaseProvider):
         max_media=20,
         supports_threads=True,
         supports_first_comment=True,
+        inbox=True,
+        inbox_interval=10,
+        inbox_reply=True,
         first_comment_max=500,
         metric_names=("impressions", "likes", "comments", "shares"),
     )
@@ -192,6 +205,33 @@ class ThreadsProvider(BaseProvider):
         media_id = self._publish_container(creation)
         permalink = self._g("GET", media_id, fields="permalink").get("permalink", "")
         return PublishResult(external_id=media_id, url=permalink)
+
+    def fetch_inbox(self, state, recent_posts):
+        own = (self.channel.handle or "").lstrip("@").lower()
+        entries = []
+        for mid in recent_posts[:15]:
+            res = self._g("GET", f"{mid}/replies", fields="id,text,username,timestamp,permalink", reverse="false")
+            for r in res.get("data", []):
+                if (r.get("username") or "").lower() == own:
+                    continue
+                entries.append(
+                    InboxEntry(
+                        external_id=r["id"],
+                        kind="reply",
+                        text=r.get("text", ""),
+                        url=r.get("permalink", ""),
+                        author_name=r.get("username", ""),
+                        author_handle="@" + r.get("username", ""),
+                        author_url=f"https://www.threads.com/@{r.get('username', '')}",
+                        created_at=parse_time(r.get("timestamp")),
+                        post_external_id=mid,
+                    )
+                )
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        media_id = self._publish_container(self._container(text=text, reply_to=entry.external_id))
+        return PublishResult(external_id=media_id, url="")
 
     def publish_reply(self, content, parent, root):
         media_id = self._publish_container(self._container(text=content.text.strip(), reply_to=parent.external_id))

@@ -9,12 +9,26 @@ from urllib.parse import urlencode
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri, repeatable
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    InboxEntry,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    redirect_uri,
+    repeatable,
+)
+from .text import parse_time
 
 SCOPES = [
     "pages_show_list",
     "pages_read_engagement",
     "pages_manage_posts",
+    # Inbox: read comments on the Page's posts and answer them.
+    "pages_read_user_content",
+    "pages_manage_engagement",
     "read_insights",
     "business_management",
     "instagram_basic",
@@ -142,6 +156,9 @@ class FacebookProvider(MetaBase):
     capabilities = Capabilities(
         max_chars=63206,
         supports_edit=True,
+        inbox=True,
+        inbox_interval=10,
+        inbox_reply=True,
         max_media=10,
         supports_first_comment=True,
         first_comment_max=8000,
@@ -182,6 +199,42 @@ class FacebookProvider(MetaBase):
 
     def post_first_comment(self, external_id, text):
         return self.g("POST", f"{external_id}/comments", data={"message": text})["id"]
+
+    def fetch_inbox(self, state, recent_posts):
+        page = self.channel.external_id
+        entries = []
+        for pid in recent_posts[:15]:
+            res = self.g(
+                "GET",
+                f"{pid}/comments",
+                params={
+                    "fields": "id,message,from{id,name,picture},created_time,permalink_url,parent{id}",
+                    "filter": "stream",
+                    "order": "reverse_chronological",
+                    "limit": 50,
+                },
+            )
+            for c in res.get("data", []):
+                who = c.get("from") or {}
+                if who.get("id") == page:
+                    continue  # the Page's own answers
+                entries.append(
+                    InboxEntry(
+                        external_id=c["id"],
+                        kind="comment",
+                        text=c.get("message", ""),
+                        url=c.get("permalink_url", ""),
+                        author_name=who.get("name", ""),
+                        author_avatar=((who.get("picture") or {}).get("data") or {}).get("url", ""),
+                        created_at=parse_time(c.get("created_time")),
+                        post_external_id=pid,
+                    )
+                )
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        res = self.g("POST", f"{entry.external_id}/comments", data={"message": text})
+        return PublishResult(external_id=res["id"], url="")
 
     def fetch_metrics(self, external_ids):
         out = {}
@@ -235,8 +288,45 @@ class InstagramProvider(MetaBase):
         requires_media=True,
         supports_first_comment=True,
         first_comment_max=2200,
+        inbox=True,
+        inbox_interval=10,
+        inbox_reply=True,
         metric_names=("impressions", "reach", "likes", "comments", "shares", "saves"),
     )
+
+    def fetch_inbox(self, state, recent_posts):
+        own = (self.channel.handle or "").lstrip("@").lower()
+        entries = []
+        for mid in recent_posts[:15]:
+            res = self.g(
+                "GET",
+                f"{mid}/comments",
+                params={"fields": "id,text,username,timestamp,replies{id,text,username,timestamp}", "limit": 50},
+            )
+            for c in res.get("data", []):
+                for item in [c, *((c.get("replies") or {}).get("data") or [])]:
+                    if (item.get("username") or "").lower() == own:
+                        continue
+                    entries.append(
+                        InboxEntry(
+                            external_id=item["id"],
+                            kind="comment",
+                            text=item.get("text", ""),
+                            author_name=item.get("username", ""),
+                            author_handle="@" + item.get("username", ""),
+                            author_url=f"https://instagram.com/{item.get('username', '')}",
+                            created_at=parse_time(item.get("timestamp")),
+                            post_external_id=mid,
+                            # Instagram replies only nest one level: answer under the top comment.
+                            context={"reply_to": c["id"]},
+                        )
+                    )
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        target = entry.context.get("reply_to") or entry.external_id
+        res = self.g("POST", f"{target}/replies", data={"message": text})
+        return PublishResult(external_id=res["id"], url="")
 
     def validate(self, content):
         problems = super().validate(content)

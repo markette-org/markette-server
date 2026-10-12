@@ -119,3 +119,24 @@ def split_thread(text, limit, mode="chars", numbering=True):
     if numbering and len(posts) > 1:
         posts = [f"{p}\n\n{i}/{len(posts)}" for i, p in enumerate(posts, 1)]
     return posts
+
+
+def html_to_text(value):
+    """Plain text of a small HTML fragment (Mastodon statuses, WordPress and DEV comments)."""
+    import html as htmllib
+
+    value = re.sub(r"<br\s*/?>", "\n", value or "", flags=re.I)
+    value = re.sub(r"</p>\s*<p[^>]*>", "\n\n", value, flags=re.I)
+    value = re.sub(r"<[^>]+>", "", value)
+    return htmllib.unescape(value).strip()
+
+
+def parse_time(value):
+    """An aware datetime from an ISO 8601 string (Z, offsets, or none = UTC); None if it is not one."""
+    from datetime import UTC, datetime
+
+    try:
+        when = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=UTC)

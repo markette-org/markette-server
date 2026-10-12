@@ -13,13 +13,18 @@ from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, Metrics, ProviderError, PublishResult, redirect_uri
+from .base import BaseProvider, Candidate, Capabilities, InboxEntry, Metrics, ProviderError, PublishResult, redirect_uri
+from .text import parse_time
 
 AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN = "https://oauth2.googleapis.com/token"
 API = "https://www.googleapis.com/youtube/v3"
 UPLOAD = "https://www.googleapis.com/upload/youtube/v3/videos"
-SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+# youtube.force-ssl lets Markette answer comments from the inbox.
+SCOPES = (
+    "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly "
+    "https://www.googleapis.com/auth/youtube.force-ssl"
+)
 CHUNK = 8 * 1024 * 1024
 
 
@@ -31,6 +36,9 @@ class YouTubeProvider(BaseProvider):
         max_media=1,
         requires_media=True,
         supports_title=True,
+        inbox=True,
+        inbox_interval=30,  # comment reads cost quota
+        inbox_reply=True,
         metric_names=("impressions", "likes", "comments"),
     )
 
@@ -177,6 +185,51 @@ class YouTubeProvider(BaseProvider):
 
     def delete(self, external_id):
         self.http("DELETE", f"{API}/videos", headers=self.headers, params={"id": external_id})
+
+    def fetch_inbox(self, state, recent_posts):
+        entries = []
+        for vid in recent_posts[:10]:
+            res = self.http(
+                "GET",
+                f"{API}/commentThreads",
+                headers=self.headers,
+                params={
+                    "part": "snippet",
+                    "videoId": vid,
+                    "order": "time",
+                    "maxResults": 50,
+                    "textFormat": "plainText",
+                },
+            ).json()
+            for thread in res.get("items", []):
+                top = (thread.get("snippet") or {}).get("topLevelComment") or {}
+                sn = top.get("snippet") or {}
+                if sn.get("authorChannelId", {}).get("value") == self.channel.external_id:
+                    continue
+                entries.append(
+                    InboxEntry(
+                        external_id=top["id"],
+                        kind="comment",
+                        text=sn.get("textOriginal") or sn.get("textDisplay", ""),
+                        url=f"https://www.youtube.com/watch?v={vid}&lc={top['id']}",
+                        author_name=sn.get("authorDisplayName", ""),
+                        author_avatar=sn.get("authorProfileImageUrl", ""),
+                        author_url=sn.get("authorChannelUrl", ""),
+                        created_at=parse_time(sn.get("publishedAt")),
+                        post_external_id=vid,
+                    )
+                )
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        res = self.http(
+            "POST",
+            f"{API}/comments",
+            headers=self.headers,
+            params={"part": "snippet"},
+            json={"snippet": {"parentId": entry.external_id, "textOriginal": text}},
+        ).json()
+        return PublishResult(external_id=res["id"], url="")
 
     def fetch_metrics(self, external_ids):
         out = {}

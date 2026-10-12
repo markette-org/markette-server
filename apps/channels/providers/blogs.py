@@ -19,11 +19,13 @@ from .base import (
     Candidate,
     Capabilities,
     CredentialField,
+    InboxEntry,
     Metrics,
     ProviderError,
     PublishResult,
     repeatable,
 )
+from .text import html_to_text, parse_time
 
 BLOG_CAPS = dict(
     kind="blog",
@@ -73,7 +75,7 @@ class WordPressProvider(BaseProvider):
     key = "wordpress"
     label = "WordPress"
     duplicate_guard = "lookup"
-    capabilities = Capabilities(**BLOG_CAPS)
+    capabilities = Capabilities(**{**BLOG_CAPS, "inbox": True, "inbox_interval": 10, "inbox_reply": True})
     credential_fields = [
         CredentialField("base_url", "Site URL", type="url", help="e.g. https://blog.example.com"),
         CredentialField("username", "Username"),
@@ -182,6 +184,45 @@ class WordPressProvider(BaseProvider):
         post = self.http("POST", f"{self.api}/posts", headers=self.headers, json=body).json()
         media_map = {u: r.get("source_url", u) for u, r in uploaded.items()}
         return PublishResult(external_id=str(post["id"]), url=post.get("link", ""), extra={"media_map": media_map})
+
+    def fetch_inbox(self, state, recent_posts):
+        if not recent_posts:
+            return [], state
+        comments = self.http(
+            "GET",
+            f"{self.api}/comments",
+            headers=self.headers,
+            params={"post": ",".join(recent_posts[:20]), "per_page": 50, "orderby": "date", "order": "desc"},
+        ).json()
+        me = (self.creds.get("username") or "").lower()
+        entries = []
+        for c in comments:
+            if (c.get("author_name") or "").lower() == me:
+                continue
+            entries.append(
+                InboxEntry(
+                    external_id=str(c["id"]),
+                    kind="comment",
+                    text=html_to_text((c.get("content") or {}).get("rendered", "")),
+                    url=c.get("link", ""),
+                    author_name=c.get("author_name", ""),
+                    author_avatar=(c.get("author_avatar_urls") or {}).get("96", ""),
+                    author_url=c.get("author_url", ""),
+                    created_at=parse_time(c.get("date_gmt")),
+                    post_external_id=str(c.get("post", "")),
+                    context={"post": c.get("post")},
+                )
+            )
+        return entries, state
+
+    def reply_inbox(self, entry, text):
+        c = self.http(
+            "POST",
+            f"{self.api}/comments",
+            headers=self.headers,
+            json={"post": entry.context.get("post"), "parent": int(entry.external_id), "content": text},
+        ).json()
+        return PublishResult(external_id=str(c["id"]), url=c.get("link", ""))
 
     def update(self, external_id, content, extra):
         html = inline_images(render_html(content.text), content.media, extra.get("media_map") or {})
