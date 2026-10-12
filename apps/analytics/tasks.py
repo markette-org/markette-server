@@ -127,3 +127,7 @@ def send_due_reports():
             report.last_error = str(exc)[:2000]
             report.save(update_fields=["last_error"])
     return sent
+
+
+# Celery only auto-discovers tasks.py modules: register the history import task here too.
+from .history import import_history  # noqa: E402, F401

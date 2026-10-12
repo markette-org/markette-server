@@ -34,7 +34,7 @@ CSV_FIELDS = (
 
 def period_range(report: Report, today: date):
     if report.period == ReportPeriod.LAST_7:
-        return today - timedelta(days=7), today - timedelta(days=1)
+        return today - timedelta(days=6), today
     if report.period == ReportPeriod.PREVIOUS_WEEK:
         monday = today - timedelta(days=today.weekday())
         return monday - timedelta(days=7), monday - timedelta(days=1)
@@ -42,7 +42,7 @@ def period_range(report: Report, today: date):
         first = today.replace(day=1)
         last = first - timedelta(days=1)
         return last.replace(day=1), last
-    return today - timedelta(days=30), today - timedelta(days=1)
+    return today - timedelta(days=29), today
 
 
 def targets(report: Report, d0: date, d1: date):

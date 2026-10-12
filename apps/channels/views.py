@@ -1,8 +1,10 @@
 import logging
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.shortcuts import get_object_or_404, redirect
+from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -268,6 +270,10 @@ class ChannelViewSet(
             raise ValidationError({"detail": f"{channel.get_provider().label} cannot list past posts."})
         jobs = HistoryImport.objects.filter(channel=channel, workspace=self.workspace)
         if request.method == "POST":
+            # A job no worker picked up within 15 minutes is abandoned, not running.
+            jobs.filter(status__in=("queued", "running"), created_at__lt=timezone.now() - timedelta(minutes=15)).update(
+                status="failed", error="The import did not start; try again."
+            )
             if jobs.filter(status__in=("queued", "running")).exists():
                 raise ValidationError({"detail": "An import of this channel is already running."})
             try:
