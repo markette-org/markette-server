@@ -84,6 +84,8 @@ class Post(TimeStamped):
     campaign = models.ForeignKey(Campaign, null=True, blank=True, on_delete=models.SET_NULL, related_name="posts")
     title = models.CharField(max_length=300, blank=True)
     body = models.TextField(blank=True)
+    # Brought in from a network's history (published outside Markette); read-only for analytics.
+    imported = models.BooleanField(default=False)
     link = models.URLField(max_length=1000, blank=True)
     tags = models.JSONField(default=list, blank=True)
     media = models.ManyToManyField(MediaAsset, through="PostMedia", blank=True, related_name="posts")

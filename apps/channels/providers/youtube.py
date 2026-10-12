@@ -13,7 +13,17 @@ from django.utils import timezone
 
 from apps.platform import conf
 
-from .base import BaseProvider, Candidate, Capabilities, InboxEntry, Metrics, ProviderError, PublishResult, redirect_uri
+from .base import (
+    BaseProvider,
+    Candidate,
+    Capabilities,
+    HistoryEntry,
+    InboxEntry,
+    Metrics,
+    ProviderError,
+    PublishResult,
+    redirect_uri,
+)
 from .text import parse_time
 
 AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -36,6 +46,7 @@ class YouTubeProvider(BaseProvider):
         max_media=1,
         requires_media=True,
         supports_title=True,
+        history=True,
         inbox=True,
         inbox_interval=30,  # comment reads cost quota
         inbox_reply=True,
@@ -185,6 +196,42 @@ class YouTubeProvider(BaseProvider):
 
     def delete(self, external_id):
         self.http("DELETE", f"{API}/videos", headers=self.headers, params={"id": external_id})
+
+    def fetch_history(self, limit=100):
+        ch = self.http(
+            "GET",
+            f"{API}/channels",
+            headers=self.headers,
+            params={"part": "contentDetails", "id": self.channel.external_id},
+        ).json()
+        items = ch.get("items") or []
+        if not items:
+            return []
+        uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        out, token = [], None
+        while len(out) < limit:
+            params = {"part": "snippet", "playlistId": uploads, "maxResults": 50}
+            if token:
+                params["pageToken"] = token
+            res = self.http("GET", f"{API}/playlistItems", headers=self.headers, params=params).json()
+            for it in res.get("items", []):
+                sn = it.get("snippet") or {}
+                vid = (sn.get("resourceId") or {}).get("videoId")
+                if not vid:
+                    continue
+                out.append(
+                    HistoryEntry(
+                        external_id=vid,
+                        published_at=parse_time(sn.get("publishedAt")),
+                        title=sn.get("title", ""),
+                        text=sn.get("description", ""),
+                        url=f"https://www.youtube.com/watch?v={vid}",
+                    )
+                )
+            token = res.get("nextPageToken")
+            if not token:
+                break
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         entries = []

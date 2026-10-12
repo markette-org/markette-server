@@ -83,3 +83,21 @@ class Report(models.Model):
 
     class Meta:
         ordering = ["name", "pk"]
+
+
+class HistoryImport(models.Model):
+    """Bringing a channel's past posts into a workspace, for analytics and best times."""
+
+    channel = models.ForeignKey("channels.Channel", on_delete=models.CASCADE, related_name="history_imports")
+    workspace = models.ForeignKey("tenants.Workspace", on_delete=models.CASCADE, related_name="history_imports")
+    requested_by = models.ForeignKey("core.User", null=True, on_delete=models.SET_NULL)
+    limit = models.PositiveIntegerField(default=100)
+    status = models.CharField(max_length=10, default="queued")  # queued | running | done | failed
+    found = models.PositiveIntegerField(default=0)
+    imported = models.PositiveIntegerField(default=0)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]

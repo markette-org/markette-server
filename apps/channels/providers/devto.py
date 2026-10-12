@@ -13,6 +13,7 @@ from .base import (
     Candidate,
     Capabilities,
     CredentialField,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -47,6 +48,7 @@ class DevtoProvider(BaseProvider):
         supports_video=False,
         supports_title=True,
         supports_edit=True,
+        history=True,
         # Forem's API lists comments but cannot post them: the inbox links to the article to answer.
         inbox=True,
         inbox_interval=15,
@@ -191,6 +193,35 @@ class DevtoProvider(BaseProvider):
         article.pop("organization_id", None)
         article.pop("published", None)  # keep it published (or a draft) as it is
         self.http("PUT", f"{self.base}/api/articles/{external_id}", headers=self._headers(), json={"article": article})
+
+    def fetch_history(self, limit=100):
+        out, page = [], 1
+        while len(out) < limit:
+            items = self.http(
+                "GET",
+                f"{self.base}/api/articles/me/published",
+                headers=self._headers(),
+                params={"page": page, "per_page": 100},
+            ).json()
+            for a in items:
+                out.append(
+                    HistoryEntry(
+                        external_id=str(a["id"]),
+                        published_at=parse_time(a.get("published_at")),
+                        title=a.get("title", ""),
+                        text=a.get("description", ""),
+                        url=a.get("url", ""),
+                        metrics=Metrics(
+                            impressions=a.get("page_views_count"),
+                            likes=a.get("public_reactions_count"),
+                            comments=a.get("comments_count"),
+                        ),
+                    )
+                )
+            if len(items) < 100:
+                break
+            page += 1
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         me = (self.channel.config.get("username") or "").lower()

@@ -208,12 +208,14 @@ class PostSerializer(serializers.ModelSerializer):
             "needs_approval",
             "can_review",
             "hidden_targets",
+            "imported",
             "created_at",
             "updated_at",
         )
         read_only_fields = (
             "id",
             "status",
+            "imported",
             "schedule_mode",
             "window_start",
             "window_end",

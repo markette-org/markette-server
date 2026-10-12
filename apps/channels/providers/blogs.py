@@ -19,6 +19,7 @@ from .base import (
     Candidate,
     Capabilities,
     CredentialField,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -75,7 +76,9 @@ class WordPressProvider(BaseProvider):
     key = "wordpress"
     label = "WordPress"
     duplicate_guard = "lookup"
-    capabilities = Capabilities(**{**BLOG_CAPS, "inbox": True, "inbox_interval": 10, "inbox_reply": True})
+    capabilities = Capabilities(
+        **{**BLOG_CAPS, "inbox": True, "inbox_interval": 10, "inbox_reply": True, "history": True}
+    )
     credential_fields = [
         CredentialField("base_url", "Site URL", type="url", help="e.g. https://blog.example.com"),
         CredentialField("username", "Username"),
@@ -184,6 +187,40 @@ class WordPressProvider(BaseProvider):
         post = self.http("POST", f"{self.api}/posts", headers=self.headers, json=body).json()
         media_map = {u: r.get("source_url", u) for u, r in uploaded.items()}
         return PublishResult(external_id=str(post["id"]), url=post.get("link", ""), extra={"media_map": media_map})
+
+    def fetch_history(self, limit=100):
+        out, page = [], 1
+        while len(out) < limit:
+            try:
+                posts = self.http(
+                    "GET",
+                    f"{self.api}/posts",
+                    headers=self.headers,
+                    params={
+                        "status": "publish",
+                        "per_page": 100,
+                        "page": page,
+                        "_fields": "id,date_gmt,link,title,content",
+                    },
+                ).json()
+            except ProviderError as exc:
+                if exc.status == 400:  # past the last page
+                    break
+                raise
+            for p in posts:
+                out.append(
+                    HistoryEntry(
+                        external_id=str(p["id"]),
+                        published_at=parse_time(p.get("date_gmt")),
+                        title=html_to_text((p.get("title") or {}).get("rendered", "")),
+                        text=html_to_text((p.get("content") or {}).get("rendered", ""))[:5000],
+                        url=p.get("link", ""),
+                    )
+                )
+            if len(posts) < 100:
+                break
+            page += 1
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         if not recent_posts:

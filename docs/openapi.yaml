@@ -1165,6 +1165,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/Channel'
           description: ''
+  /api/channels/{id}/import-history/:
+    get:
+      operationId: channels_import_history_retrieve
+      description: POST {limit} imports the channel's past posts into this workspace;
+        GET shows the latest import.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+    post:
+      operationId: channels_import_history_create
+      description: POST {limit} imports the channel's past posts into this workspace;
+        GET shows the latest import.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
   /api/channels/{id}/relevance/:
     post:
       operationId: channels_relevance_create
@@ -7908,6 +7983,9 @@ components:
           description: Publications on channels this user cannot see (kept untouched
             on save).
           readOnly: true
+        imported:
+          type: boolean
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -7923,6 +8001,7 @@ components:
       - created_at
       - hidden_targets
       - id
+      - imported
       - media
       - needs_approval
       - reviewed_at

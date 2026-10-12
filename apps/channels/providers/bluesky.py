@@ -10,6 +10,7 @@ from .base import (
     Capabilities,
     Content,
     CredentialField,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -39,6 +40,7 @@ class BlueskyProvider(BaseProvider):
         supports_threads=True,
         inbox=True,
         inbox_reply=True,
+        history=True,
         auth="credentials",
         metric_names=("likes", "comments", "shares"),
     )
@@ -294,6 +296,37 @@ class BlueskyProvider(BaseProvider):
         )
 
     # --- metrics ---------------------------------------------------------
+    def fetch_history(self, limit=100):
+        out, cursor = [], None
+        handle = (self.channel.handle or self.channel.external_id).lstrip("@")
+        while len(out) < limit:
+            params = {"actor": self.channel.external_id, "filter": "posts_no_replies", "limit": 100}
+            if cursor:
+                params["cursor"] = cursor
+            res = self.http("GET", f"{APPVIEW}/xrpc/app.bsky.feed.getAuthorFeed", params=params).json()
+            for item in res.get("feed", []):
+                p = item.get("post") or {}
+                if item.get("reason") or (p.get("author") or {}).get("did") != self.channel.external_id:
+                    continue  # reposts
+                rec = p.get("record") or {}
+                out.append(
+                    HistoryEntry(
+                        external_id=p["uri"],
+                        published_at=parse_time(rec.get("createdAt") or p.get("indexedAt")),
+                        text=rec.get("text", ""),
+                        url=f"https://bsky.app/profile/{handle}/post/{p['uri'].rsplit('/', 1)[-1]}",
+                        metrics=Metrics(
+                            likes=p.get("likeCount"),
+                            comments=p.get("replyCount"),
+                            shares=(p.get("repostCount") or 0) + (p.get("quoteCount") or 0),
+                        ),
+                    )
+                )
+            cursor = res.get("cursor")
+            if not cursor or not res.get("feed"):
+                break
+        return out[:limit]
+
     def fetch_metrics(self, external_ids):
         out = {}
         for i in range(0, len(external_ids), 25):

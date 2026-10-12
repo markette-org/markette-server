@@ -257,6 +257,44 @@ class ChannelViewSet(
         except ProviderError as exc:
             raise _reddit_error(channel, exc) from exc
 
+    @action(detail=True, methods=["get", "post"], url_path="import-history")
+    def import_history(self, request, pk=None):
+        """POST {limit} imports the channel's past posts into this workspace; GET shows the latest import."""
+        from apps.analytics.history import MAX, import_history
+        from apps.analytics.models import HistoryImport
+
+        channel = self.get_object()
+        if not channel.get_provider().capabilities.history:
+            raise ValidationError({"detail": f"{channel.get_provider().label} cannot list past posts."})
+        jobs = HistoryImport.objects.filter(channel=channel, workspace=self.workspace)
+        if request.method == "POST":
+            if jobs.filter(status__in=("queued", "running")).exists():
+                raise ValidationError({"detail": "An import of this channel is already running."})
+            try:
+                limit = min(max(int(request.data.get("limit") or 100), 1), MAX)
+            except (TypeError, ValueError):
+                raise ValidationError({"limit": f"A number of posts (1–{MAX})."}) from None
+            job = HistoryImport.objects.create(
+                channel=channel, workspace=self.workspace, requested_by=request.user, limit=limit
+            )
+            import_history.delay(job.pk)
+            job.refresh_from_db()
+        job = jobs.first()
+        if job is None:
+            return Response(None)
+        return Response(
+            {
+                "id": job.pk,
+                "status": job.status,
+                "limit": job.limit,
+                "found": job.found,
+                "imported": job.imported,
+                "error": job.error,
+                "created_at": job.created_at,
+                "finished_at": job.finished_at,
+            }
+        )
+
     @action(detail=True, methods=["post"], url_path="add-subreddit")
     def add_subreddit(self, request, pk=None):
         """Add a specific subreddit as a channel, using this Reddit channel's account. Body: {name}."""

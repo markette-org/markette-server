@@ -13,6 +13,7 @@ from .base import (
     BaseProvider,
     Candidate,
     Capabilities,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -156,6 +157,7 @@ class FacebookProvider(MetaBase):
     capabilities = Capabilities(
         max_chars=63206,
         supports_edit=True,
+        history=True,
         inbox=True,
         inbox_interval=10,
         inbox_reply=True,
@@ -199,6 +201,27 @@ class FacebookProvider(MetaBase):
 
     def post_first_comment(self, external_id, text):
         return self.g("POST", f"{external_id}/comments", data={"message": text})["id"]
+
+    def fetch_history(self, limit=100):
+        out, after = [], None
+        while len(out) < limit:
+            params = {"fields": "id,message,created_time,permalink_url", "limit": 100}
+            if after:
+                params["after"] = after
+            res = self.g("GET", f"{self.channel.external_id}/posts", params=params)
+            for p in res.get("data", []):
+                out.append(
+                    HistoryEntry(
+                        external_id=p["id"],
+                        published_at=parse_time(p.get("created_time")),
+                        text=p.get("message", ""),
+                        url=p.get("permalink_url") or f"https://www.facebook.com/{p['id']}",
+                    )
+                )
+            after = ((res.get("paging") or {}).get("cursors") or {}).get("after")
+            if not after or not res.get("data") or not (res.get("paging") or {}).get("next"):
+                break
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         page = self.channel.external_id
@@ -288,11 +311,34 @@ class InstagramProvider(MetaBase):
         requires_media=True,
         supports_first_comment=True,
         first_comment_max=2200,
+        history=True,
         inbox=True,
         inbox_interval=10,
         inbox_reply=True,
         metric_names=("impressions", "reach", "likes", "comments", "shares", "saves"),
     )
+
+    def fetch_history(self, limit=100):
+        out, after = [], None
+        while len(out) < limit:
+            params = {"fields": "id,caption,timestamp,permalink,like_count,comments_count", "limit": 50}
+            if after:
+                params["after"] = after
+            res = self.g("GET", f"{self.channel.external_id}/media", params=params)
+            for m in res.get("data", []):
+                out.append(
+                    HistoryEntry(
+                        external_id=m["id"],
+                        published_at=parse_time(m.get("timestamp")),
+                        text=m.get("caption", ""),
+                        url=m.get("permalink", ""),
+                        metrics=Metrics(likes=m.get("like_count"), comments=m.get("comments_count")),
+                    )
+                )
+            after = ((res.get("paging") or {}).get("cursors") or {}).get("after")
+            if not after or not res.get("data") or not (res.get("paging") or {}).get("next"):
+                break
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         own = (self.channel.handle or "").lstrip("@").lower()

@@ -24,6 +24,7 @@ from .base import (
     BaseProvider,
     Candidate,
     Capabilities,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -70,6 +71,7 @@ class RedditProvider(BaseProvider):
         supports_title=True,
         supports_first_comment=True,
         first_comment_max=10000,
+        history=True,
         inbox=True,
         inbox_interval=10,
         inbox_reply=True,
@@ -423,6 +425,34 @@ class RedditProvider(BaseProvider):
         if post is None:
             raise ProviderError("Reddit accepted the image post but did not confirm it; check the subreddit.")
         return PublishResult(external_id=post["name"], url=f"https://www.reddit.com{post['permalink']}")
+
+    def fetch_history(self, limit=100):
+        me = self.channel.config.get("username") or ""
+        sub = (self.channel.config.get("subreddit") or "").lower()
+        out, after = [], None
+        while len(out) < limit and me:
+            params = {"limit": 100}
+            if after:
+                params["after"] = after
+            listing = self.api("GET", f"/user/{me}/submitted", params=params).get("data") or {}
+            for child in listing.get("children", []):
+                d = child.get("data") or {}
+                if sub and (d.get("subreddit") or "").lower() != sub:
+                    continue  # this channel is one subreddit
+                out.append(
+                    HistoryEntry(
+                        external_id=d["name"],
+                        published_at=datetime.fromtimestamp(d.get("created_utc") or 0, tz=UTC),
+                        title=d.get("title", ""),
+                        text=d.get("selftext", ""),
+                        url=f"https://www.reddit.com{d.get('permalink', '')}",
+                        metrics=Metrics(likes=d.get("score"), comments=d.get("num_comments")),
+                    )
+                )
+            after = listing.get("after")
+            if not after:
+                break
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         me = (self.channel.config.get("username") or "").lower()

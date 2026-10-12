@@ -13,6 +13,7 @@ from .base import (
     Candidate,
     Capabilities,
     CredentialField,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -50,6 +51,7 @@ class MastodonProvider(BaseProvider):
         supports_edit=True,
         inbox=True,
         inbox_reply=True,
+        history=True,
         instance_url=True,
         metric_names=("likes", "comments", "shares"),
     )
@@ -233,6 +235,37 @@ class MastodonProvider(BaseProvider):
         self.http("DELETE", f"{self.base}/api/v1/statuses/{external_id}", headers=self.headers)
 
     # --- metrics ---------------------------------------------------------
+    def fetch_history(self, limit=100):
+        out, max_id = [], None
+        while len(out) < limit:
+            params = {"exclude_replies": "true", "exclude_reblogs": "true", "limit": 40}
+            if max_id:
+                params["max_id"] = max_id
+            page = self.http(
+                "GET",
+                f"{self.base}/api/v1/accounts/{self.channel.external_id}/statuses",
+                headers=self.headers,
+                params=params,
+            ).json()
+            if not page:
+                break
+            for st in page:
+                out.append(
+                    HistoryEntry(
+                        external_id=st["id"],
+                        published_at=parse_time(st.get("created_at")),
+                        text=html_to_text(st.get("content")),
+                        url=st.get("url") or "",
+                        metrics=Metrics(
+                            likes=st.get("favourites_count"),
+                            comments=st.get("replies_count"),
+                            shares=st.get("reblogs_count"),
+                        ),
+                    )
+                )
+            max_id = page[-1]["id"]
+        return out[:limit]
+
     def fetch_metrics(self, external_ids):
         out = {}
         for sid in external_ids:

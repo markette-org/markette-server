@@ -12,6 +12,7 @@ from .base import (
     BaseProvider,
     Candidate,
     Capabilities,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -33,6 +34,7 @@ class LinkedInProvider(BaseProvider):
     capabilities = Capabilities(
         max_chars=3000,
         supports_edit=True,
+        history=True,
         # Comments on company page posts (organization scopes); personal profiles cannot read them.
         inbox=True,
         inbox_interval=15,
@@ -276,6 +278,30 @@ class LinkedInProvider(BaseProvider):
             headers={**self.headers, "X-RestLi-Method": "PARTIAL_UPDATE"},
             json={"patch": {"$set": {"commentary": _escape_little_text(content.text)}}},
         )
+
+    def fetch_history(self, limit=100):
+        out, start = [], 0
+        while len(out) < limit:
+            res = self.http(
+                "GET",
+                f"{REST}/posts?q=author&author={quote(self.author, safe='')}&count=50&start={start}&sortBy=LAST_MODIFIED",
+                headers={**self.headers, "X-RestLi-Method": "FINDER"},
+            ).json()
+            elements = res.get("elements", [])
+            for p in elements:
+                when = p.get("publishedAt") or p.get("createdAt") or 0
+                out.append(
+                    HistoryEntry(
+                        external_id=p["id"],
+                        published_at=datetime.fromtimestamp(when / 1000, tz=UTC),
+                        text=p.get("commentary", ""),
+                        url=f"https://www.linkedin.com/feed/update/{p['id']}/",
+                    )
+                )
+            if len(elements) < 50:
+                break
+            start += 50
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         if not self.author.startswith("urn:li:organization:"):

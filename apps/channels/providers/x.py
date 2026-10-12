@@ -13,6 +13,7 @@ from .base import (
     Candidate,
     Capabilities,
     Content,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -41,6 +42,7 @@ class XProvider(BaseProvider):
         inbox=True,
         inbox_interval=15,
         inbox_reply=True,
+        history=True,
         metric_names=("impressions", "likes", "comments", "shares", "saves"),
     )
 
@@ -235,6 +237,38 @@ class XProvider(BaseProvider):
         self.http("DELETE", f"{API}/tweets/{external_id}", headers=self.headers)
 
     # --- metrics ---------------------------------------------------------
+    def fetch_history(self, limit=100):
+        out, token = [], None
+        username = (self.channel.handle or "i").lstrip("@")
+        while len(out) < limit:
+            params = {"max_results": 100, "exclude": "replies,retweets", "tweet.fields": "created_at,public_metrics"}
+            if token:
+                params["pagination_token"] = token
+            res = self.http(
+                "GET", f"{API}/users/{self.channel.external_id}/tweets", headers=self.headers, params=params
+            ).json()
+            for tw in res.get("data", []):
+                pm = tw.get("public_metrics", {})
+                out.append(
+                    HistoryEntry(
+                        external_id=tw["id"],
+                        published_at=parse_time(tw.get("created_at")),
+                        text=tw.get("text", ""),
+                        url=f"https://x.com/{username}/status/{tw['id']}",
+                        metrics=Metrics(
+                            impressions=pm.get("impression_count"),
+                            likes=pm.get("like_count"),
+                            comments=pm.get("reply_count"),
+                            shares=(pm.get("retweet_count") or 0) + (pm.get("quote_count") or 0),
+                            saves=pm.get("bookmark_count"),
+                        ),
+                    )
+                )
+            token = (res.get("meta") or {}).get("next_token")
+            if not token:
+                break
+        return out[:limit]
+
     def fetch_metrics(self, external_ids):
         out = {}
         for i in range(0, len(external_ids), 100):

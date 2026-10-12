@@ -17,6 +17,7 @@ from .base import (
     BaseProvider,
     Candidate,
     Capabilities,
+    HistoryEntry,
     InboxEntry,
     Metrics,
     ProviderError,
@@ -40,6 +41,7 @@ class ThreadsProvider(BaseProvider):
         max_media=20,
         supports_threads=True,
         supports_first_comment=True,
+        history=True,
         inbox=True,
         inbox_interval=10,
         inbox_reply=True,
@@ -205,6 +207,27 @@ class ThreadsProvider(BaseProvider):
         media_id = self._publish_container(creation)
         permalink = self._g("GET", media_id, fields="permalink").get("permalink", "")
         return PublishResult(external_id=media_id, url=permalink)
+
+    def fetch_history(self, limit=100):
+        out, after = [], None
+        while len(out) < limit:
+            params = {"fields": "id,text,timestamp,permalink,is_quote_post", "limit": 100}
+            if after:
+                params["after"] = after
+            res = self._g("GET", f"{self.channel.external_id}/threads", **params)
+            for p in res.get("data", []):
+                out.append(
+                    HistoryEntry(
+                        external_id=p["id"],
+                        published_at=parse_time(p.get("timestamp")),
+                        text=p.get("text", ""),
+                        url=p.get("permalink", ""),
+                    )
+                )
+            after = ((res.get("paging") or {}).get("cursors") or {}).get("after")
+            if not after or not res.get("data") or not (res.get("paging") or {}).get("next"):
+                break
+        return out[:limit]
 
     def fetch_inbox(self, state, recent_posts):
         own = (self.channel.handle or "").lstrip("@").lower()

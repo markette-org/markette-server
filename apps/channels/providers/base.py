@@ -71,6 +71,8 @@ class Capabilities:
     inbox_interval: int = 5
     # …and can be answered from Markette.
     inbox_reply: bool = False
+    # Past posts can be imported (fetch_history) for analytics and best times.
+    history: bool = False
 
 
 @dataclass
@@ -120,6 +122,18 @@ class InboxEntry:
     created_at: datetime | None = None
     post_external_id: str = ""  # our post it answers, to link it to the publication
     context: dict[str, Any] = field(default_factory=dict)  # what reply_inbox needs
+
+
+@dataclass
+class HistoryEntry:
+    """A post published on the network before (or outside) Markette."""
+
+    external_id: str
+    published_at: datetime
+    text: str = ""
+    title: str = ""
+    url: str = ""
+    metrics: Metrics | None = None
 
 
 @dataclass
@@ -232,6 +246,7 @@ class BaseProvider:
             "supports_edit": caps.supports_edit,
             "inbox": caps.inbox,
             "inbox_reply": caps.inbox_reply,
+            "history": caps.history,
         }
 
     # --- connection ------------------------------------------------------
@@ -352,6 +367,11 @@ class BaseProvider:
     def find_published(self, content: Content, since: datetime) -> PublishResult | None:
         """The post an earlier attempt created for ``content`` since ``since``, if it landed (duplicate_guard "lookup")."""
         return None
+
+    # --- history -----------------------------------------------------------
+    def fetch_history(self, limit: int = 100) -> list[HistoryEntry]:
+        """The channel's own latest posts (newest first), with their numbers when the listing has them."""
+        return []
 
     # --- inbox -------------------------------------------------------------
     def fetch_inbox(self, state: dict, recent_posts: list[str]) -> tuple[list[InboxEntry], dict]:
