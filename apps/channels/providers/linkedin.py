@@ -22,6 +22,7 @@ class LinkedInProvider(BaseProvider):
     label = "LinkedIn"
     capabilities = Capabilities(
         max_chars=3000,
+        supports_edit=True,
         max_media=9,
         supports_first_comment=True,
         first_comment_max=1250,
@@ -253,6 +254,14 @@ class LinkedInProvider(BaseProvider):
             if p.get("commentary") == commentary and (p.get("createdAt") or 0) >= since.timestamp() * 1000:
                 return PublishResult(external_id=p["id"], url=f"https://www.linkedin.com/feed/update/{p['id']}/")
         return None
+
+    def update(self, external_id, content, extra):
+        self.http(
+            "POST",
+            f"{REST}/posts/{quote(external_id, safe='')}",
+            headers={**self.headers, "X-RestLi-Method": "PARTIAL_UPDATE"},
+            json={"patch": {"$set": {"commentary": _escape_little_text(content.text)}}},
+        )
 
     def post_first_comment(self, external_id, text):
         resp = self.http(

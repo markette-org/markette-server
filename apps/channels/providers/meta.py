@@ -141,6 +141,7 @@ class FacebookProvider(MetaBase):
     label = "Facebook"
     capabilities = Capabilities(
         max_chars=63206,
+        supports_edit=True,
         max_media=10,
         supports_first_comment=True,
         first_comment_max=8000,
@@ -154,7 +155,9 @@ class FacebookProvider(MetaBase):
         if videos:
             res = self.g("POST", f"{page}/videos", data={"file_url": videos[0].url, "description": content.text})
             vid = res["id"]
-            return PublishResult(external_id=vid, url=f"https://www.facebook.com/{page}/videos/{vid}")
+            return PublishResult(
+                external_id=vid, url=f"https://www.facebook.com/{page}/videos/{vid}", extra={"video": True}
+            )
         if len(photos) == 1:
             res = self.g("POST", f"{page}/photos", data={"url": photos[0].url, "caption": content.text})
             post_id = res.get("post_id") or res["id"]
@@ -170,6 +173,12 @@ class FacebookProvider(MetaBase):
 
     def delete(self, external_id):
         self.g("DELETE", external_id)
+
+    def update(self, external_id, content, extra):
+        if "/videos/" in (extra.get("url") or "") or extra.get("video"):
+            self.g("POST", external_id, data={"description": content.text})
+        else:
+            self.g("POST", external_id, data={"message": content.text})
 
     def post_first_comment(self, external_id, text):
         return self.g("POST", f"{external_id}/comments", data={"message": text})["id"]

@@ -64,6 +64,8 @@ class Capabilities:
     instance_url: bool = False  # user must provide a server/site URL
     # Long text can go out as a thread of replies (target option "thread").
     supports_threads: bool = False
+    # A published post's text (and title) can be changed through the API.
+    supports_edit: bool = False
 
 
 @dataclass
@@ -205,6 +207,7 @@ class BaseProvider:
             "supports_first_comment": caps.supports_first_comment,
             "first_comment_max": caps.first_comment_max,
             "supports_threads": caps.supports_threads,
+            "supports_edit": caps.supports_edit,
         }
 
     # --- connection ------------------------------------------------------
@@ -325,6 +328,13 @@ class BaseProvider:
     def find_published(self, content: Content, since: datetime) -> PublishResult | None:
         """The post an earlier attempt created for ``content`` since ``since``, if it landed (duplicate_guard "lookup")."""
         return None
+
+    def update(self, external_id: str, content: Content, extra: dict) -> dict | None:
+        """Changes a published post to ``content`` (text and title; media stay as they are).
+
+        ``extra`` is what the publication stored (PublishResult.extra). Returns extra values to store.
+        """
+        raise ProviderError(f"{self.label} posts cannot be edited from Markette.")
 
     def delete(self, external_id: str) -> None:
         raise ProviderError(f"{self.label} does not support deleting from Markette.")

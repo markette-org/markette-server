@@ -36,6 +36,7 @@ class DevtoProvider(BaseProvider):
         max_media=20,
         supports_video=False,
         supports_title=True,
+        supports_edit=True,
         metric_names=("impressions", "likes", "comments"),
         auth="credentials",
     )
@@ -171,6 +172,12 @@ class DevtoProvider(BaseProvider):
         )
         data = resp.json()
         return PublishResult(external_id=str(data["id"]), url=data.get("url", ""))
+
+    def update(self, external_id, content, extra):
+        article = self._article(content)
+        article.pop("organization_id", None)
+        article.pop("published", None)  # keep it published (or a draft) as it is
+        self.http("PUT", f"{self.base}/api/articles/{external_id}", headers=self._headers(), json={"article": article})
 
     def find_published(self, content, since):
         # Your articles, drafts included, newest first. Forem gives no creation time, so the

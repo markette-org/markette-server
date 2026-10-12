@@ -390,6 +390,29 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
             dispatch_due_targets.delay()
         return Response(TargetSerializer(target, context=self.get_serializer_context()).data)
 
+    @action(detail=True, methods=["post"], url_path="edit-remote")
+    def edit_remote(self, request, pk=None):
+        """Saves a new text/title for a published post and changes it on the network."""
+        from .tasks import update_remote
+
+        target = self.get_object()
+        if target.status != TargetStatus.PUBLISHED or not target.external_id:
+            raise ValidationError("Only published posts can be edited on the network.")
+        if not target.channel.get_provider().capabilities.supports_edit:
+            raise ValidationError(f"{target.channel.get_provider().label} posts cannot be edited from Markette.")
+        before = (target.body, target.title)
+        if "body" in request.data:
+            target.body = str(request.data.get("body") or "")
+        if "title" in request.data:
+            target.title = str(request.data.get("title") or "")[:300]
+        try:
+            update_remote(target)
+        except ProviderError as exc:
+            target.body, target.title = before
+            raise ValidationError(str(exc)) from exc
+        target.save(update_fields=["body", "title", "updated_at"])
+        return Response(TargetSerializer(target, context=self.get_serializer_context()).data)
+
     @action(detail=True, methods=["post"], url_path="continue-thread")
     def continue_thread(self, request, pk=None):
         """Posts the remaining parts of a thread that stopped part-way."""

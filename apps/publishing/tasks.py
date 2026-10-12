@@ -57,6 +57,17 @@ def fill_follow(text, title, link, target: PostTarget):
     return text, title, link or url
 
 
+def with_backlinks(text, backlinks, target):
+    """Adds "Discuss this post on …" with the announcements' links (Markdown on blogs)."""
+    kind = target.channel.get_provider().capabilities.kind
+    prefix = (target.options or {}).get("backlinks_text") or "Discuss this post on"
+    if kind in ("blog", "newsletter"):
+        links = " · ".join(f"[{b['label']}]({b['url']})" for b in backlinks)
+        return f"{text.rstrip()}\n\n---\n\n{prefix} {links}."
+    links = " · ".join(f"{b['label']}: {b['url']}" for b in backlinks)
+    return f"{text.rstrip()}\n\n{prefix} {links}"
+
+
 def build_content(target: PostTarget) -> Content:
     media = []
     for a in target.effective_media():
@@ -76,6 +87,8 @@ def build_content(target: PostTarget) -> Content:
     text, title, link = target.effective_body, target.effective_title, post.link
     if target.follows_id:
         text, title, link = fill_follow(text, title, link, target)
+    if backlinks := (target.extra or {}).get("backlinks"):
+        text = with_backlinks(text, backlinks, target)
     from apps.links.tracking import apply as track_links
 
     provider = target.channel.get_provider()
@@ -221,7 +234,65 @@ def publish_target(target_id):
 
     with transaction.atomic():
         release_followers(target)
+    if target.follows_id and (target.follows.options or {}).get("backlinks"):
+        source_id = target.follows_id
+        transaction.on_commit(lambda: refresh_backlinks.delay(source_id))
     return "published"
+
+
+def update_remote(target):
+    """Pushes the publication's current text and title to the network (first post of a thread)."""
+    provider = target.channel.get_provider()
+    if not provider.capabilities.supports_edit:
+        raise ProviderError(f"{provider.label} posts cannot be edited from Markette.")
+    provider.refresh_credentials()
+    content = build_content(target)
+    problems = provider.validate(content)
+    if problems:
+        raise ProviderError(" ".join(problems))
+    content, _ = provider.prepare_first_comment(content)
+    content = provider.thread_parts(content)[0]
+    stored = {**(target.extra or {}), "url": target.external_url}
+    changes = provider.update(target.external_id, content, stored) or {}
+    if changes.get("url"):
+        target.external_url = changes.pop("url")[:1000]
+    target.extra = {**(target.extra or {}), **changes, "edited_at": timezone.now().isoformat()}
+    target.save(update_fields=["extra", "external_url", "updated_at"])
+
+
+@shared_task
+def refresh_backlinks(source_id):
+    """Adds the announcements' links to the publication they announce, once they are live."""
+    source = PostTarget.objects.select_related("channel", "post__workspace").filter(pk=source_id).first()
+    if source is None or source.status != TargetStatus.PUBLISHED:
+        return "skipped"
+    followers = list(
+        source.followers.filter(status=TargetStatus.PUBLISHED)
+        .exclude(external_url="")
+        .select_related("channel")
+        .order_by("published_at")
+    )
+    providers = [f.channel.provider for f in followers]
+    backlinks = [
+        {
+            # The network's name, or the channel's when two announcements share a network.
+            "label": f.channel.name if providers.count(f.channel.provider) > 1 else f.channel.get_provider().label,
+            "url": f.external_url,
+        }
+        for f in followers
+    ]
+    if backlinks == (source.extra or {}).get("backlinks"):
+        return "unchanged"
+    previous = (source.extra or {}).get("backlinks")
+    source.extra = {**(source.extra or {}), "backlinks": backlinks}
+    try:
+        update_remote(source)
+    except ProviderError as exc:
+        source.extra["backlinks"] = previous
+        source.last_error = f"Published, but the links to its announcements could not be added: {exc}"[:4000]
+        source.save(update_fields=["extra", "last_error", "updated_at"])
+        return "failed"
+    return "updated"
 
 
 def _thread_entry(result):

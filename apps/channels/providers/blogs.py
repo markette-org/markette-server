@@ -27,6 +27,7 @@ from .base import (
 
 BLOG_CAPS = dict(
     kind="blog",
+    supports_edit=True,
     max_chars=None,
     max_media=20,
     supports_title=True,
@@ -179,7 +180,16 @@ class WordPressProvider(BaseProvider):
         if tags:
             body["tags"] = self._terms("tags", tags)
         post = self.http("POST", f"{self.api}/posts", headers=self.headers, json=body).json()
-        return PublishResult(external_id=str(post["id"]), url=post.get("link", ""))
+        media_map = {u: r.get("source_url", u) for u, r in uploaded.items()}
+        return PublishResult(external_id=str(post["id"]), url=post.get("link", ""), extra={"media_map": media_map})
+
+    def update(self, external_id, content, extra):
+        html = inline_images(render_html(content.text), content.media, extra.get("media_map") or {})
+        body = {"title": content.title, "content": html}
+        if content.options.get("excerpt"):
+            body["excerpt"] = content.options["excerpt"]
+        post = self.http("POST", f"{self.api}/posts/{external_id}", headers=self.headers, json=body).json()
+        return {"url": post.get("link")} if post.get("link") else None
 
     def find_published(self, content, since):
         # Your latest posts in any state, as stored (context=edit gives the raw title and body).
@@ -333,6 +343,7 @@ class DrupalProvider(BaseProvider):
             if uri:
                 mapping[m.url] = uri if uri.startswith("http") else f"{self.channel.base_url}{uri}"
         html = inline_images(render_html(content.text), content.media, mapping)
+        self._media_map = mapping
         attributes = {
             "title": content.title,
             "body": {"value": html, "format": cfg.get("body_format", "basic_html")},
@@ -363,7 +374,28 @@ class DrupalProvider(BaseProvider):
         node = self.http(
             "POST", self.node_url, json=body, headers={**self.headers, "Content-Type": "application/vnd.api+json"}
         ).json()["data"]
-        return self._result(node)
+        result = self._result(node)
+        result.extra["media_map"] = self._media_map
+        return result
+
+    def update(self, external_id, content, extra):
+        cfg = self.channel.config
+        html = inline_images(render_html(content.text), content.media, extra.get("media_map") or {})
+        body = {"value": html, "format": cfg.get("body_format", "basic_html")}
+        if content.options.get("excerpt"):
+            body["summary"] = content.options["excerpt"]
+        self.http(
+            "PATCH",
+            f"{self.node_url}/{external_id}",
+            headers={**self.headers, "Content-Type": "application/vnd.api+json"},
+            json={
+                "data": {
+                    "type": f"node--{cfg.get('bundle', 'article')}",
+                    "id": external_id,
+                    "attributes": {"title": content.title, "body": body},
+                }
+            },
+        )
 
     def node_uuid(self, content):
         """Stable per publication and per Markette server (JSON:API accepts client-generated IDs)."""

@@ -77,6 +77,7 @@ class SlackProvider(BaseProvider):
     capabilities = Capabilities(
         max_chars=TEXT_LIMIT,
         max_media=10,
+        supports_edit=True,
         auth="credentials",
         has_metrics=False,
         metric_names=(),
@@ -330,6 +331,12 @@ class SlackProvider(BaseProvider):
             return self._call("chat.getPermalink", http="GET", channel=channel_id, message_ts=ts).get("permalink", "")
         except ProviderError:
             return ""
+
+    def update(self, external_id, content, extra):
+        channel_id, _, ts = external_id.partition(":")
+        if ts.startswith("files:"):
+            raise ProviderError("Slack did not report this message's timestamp, so it cannot be edited.")
+        self._call("chat.update", channel=channel_id, ts=ts, text=self._text(content))
 
     def delete(self, external_id):
         channel_id, _, rest = external_id.partition(":")

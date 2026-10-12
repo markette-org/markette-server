@@ -32,6 +32,7 @@ class DiscordProvider(BaseProvider):
     capabilities = Capabilities(
         max_chars=6000,  # split into up to three messages
         max_media=10,
+        supports_edit=True,
         auth="credentials",
         has_metrics=False,
         metric_names=(),
@@ -98,6 +99,20 @@ class DiscordProvider(BaseProvider):
         guild = cfg.get("guild_id")
         url = f"https://discord.com/channels/{guild}/{msg['channel_id']}/{msg['id']}" if guild else ""
         return PublishResult(external_id=f"{msg['channel_id']}:{msg['id']}", url=url)
+
+    def update(self, external_id, content, extra):
+        # Only the first message is edited: text that grew past 2,000 characters does not fit.
+        channel_id, _, message_id = external_id.partition(":")
+        parts = split_text(content.text) or [""]
+        if len(parts) > 1:
+            raise ProviderError("The new text is longer than one Discord message (2,000 characters).")
+        params = {"thread_id": channel_id} if channel_id != self.channel.external_id else None
+        self.http(
+            "PATCH",
+            f"{self.creds['webhook_url']}/messages/{message_id}",
+            params=params,
+            json={"content": parts[0], "allowed_mentions": {"parse": []}},
+        )
 
     def delete(self, external_id):
         channel_id, _, message_id = external_id.partition(":")

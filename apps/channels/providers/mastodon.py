@@ -45,6 +45,7 @@ class MastodonProvider(BaseProvider):
         count_mode="mastodon",
         max_media=4,
         supports_threads=True,
+        supports_edit=True,
         instance_url=True,
         metric_names=("likes", "comments", "shares"),
     )
@@ -164,6 +165,18 @@ class MastodonProvider(BaseProvider):
             headers["Idempotency-Key"] = content.idempotency_key
         status = self.http("POST", f"{self.base}/api/v1/statuses", headers=headers, json=data).json()
         return PublishResult(external_id=status["id"], url=status.get("url") or status.get("uri", ""))
+
+    def update(self, external_id, content, extra):
+        current = self.http("GET", f"{self.base}/api/v1/statuses/{external_id}", headers=self.headers).json()
+        data = {
+            "status": content.text,
+            # Without media_ids Mastodon would drop the attachments.
+            "media_ids": [m["id"] for m in current.get("media_attachments") or []],
+            "spoiler_text": content.options.get("spoiler_text", current.get("spoiler_text") or ""),
+        }
+        if lang := content.options.get("language"):
+            data["language"] = lang
+        self.http("PUT", f"{self.base}/api/v1/statuses/{external_id}", headers=self.headers, json=data)
 
     def publish_reply(self, content, parent, root):
         return self.publish(replace(content, options={**content.options, "_in_reply_to_id": parent.external_id}))

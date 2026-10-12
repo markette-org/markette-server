@@ -29,6 +29,7 @@ class TelegramProvider(BaseProvider):
     capabilities = Capabilities(
         max_chars=TEXT_LIMIT,
         max_media=10,
+        supports_edit=True,
         auth="credentials",
         has_metrics=False,
         metric_names=(),
@@ -189,7 +190,22 @@ class TelegramProvider(BaseProvider):
             except ProviderError:
                 pass  # Published; pinning needs the "Pin messages" right.
         chat = first.get("chat") or {"id": chat_id, "username": self.channel.config.get("username")}
-        return PublishResult(external_id=f"{chat_id}:{message_id}", url=message_url(chat, message_id))
+        # What an edit has to change: the message text, or the caption under the media.
+        kind = "text" if not content.media else ("caption" if caption else "none")
+        return PublishResult(
+            external_id=f"{chat_id}:{message_id}", url=message_url(chat, message_id), extra={"edit": kind}
+        )
+
+    def update(self, external_id, content, extra):
+        chat_id, _, message_id = external_id.rpartition(":")
+        kind = extra.get("edit", "text")
+        text = content.text.strip()
+        if kind == "text":
+            self._call("editMessageText", chat_id=chat_id, message_id=int(message_id), text=text)
+        elif kind == "caption" and len(text) <= CAPTION_LIMIT:
+            self._call("editMessageCaption", chat_id=chat_id, message_id=int(message_id), caption=text)
+        else:
+            raise ProviderError("This Telegram post's text went in a separate message and cannot be edited.")
 
     def _send_single(self, item, caption, common):
         if item.is_video:
