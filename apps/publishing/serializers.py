@@ -96,6 +96,7 @@ class TargetSerializer(serializers.ModelSerializer):
             "extra",
             "metrics",
             "metrics_updated_at",
+            "link_clicks",
             "follows",
             "follows_channel",
             "follows_detail",
@@ -116,6 +117,7 @@ class TargetSerializer(serializers.ModelSerializer):
             "last_error",
             "metrics",
             "metrics_updated_at",
+            "link_clicks",
         )
         extra_kwargs = {"scheduled_at": {"read_only": True}, "follow_delay": {"max_value": 60 * 24 * 30}}
 

@@ -88,6 +88,8 @@ class Workspace(TimeStamped):
     # Minimum gap between two posts on the same channel when auto-scheduling.
     min_gap_minutes = models.PositiveIntegerField(default=90)
     ai_enabled = models.BooleanField(default=True)
+    # UTM tags and short links on social posts: {"utm", "utm_medium", "short_links", "domains"}.
+    link_tracking = models.JSONField(default=dict, blank=True)
     # Archived workspaces are read-only and publish nothing.
     archived_at = models.DateTimeField(null=True, blank=True)
 

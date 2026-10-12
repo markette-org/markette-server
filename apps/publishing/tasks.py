@@ -76,6 +76,10 @@ def build_content(target: PostTarget) -> Content:
     text, title, link = target.effective_body, target.effective_title, post.link
     if target.follows_id:
         text, title, link = fill_follow(text, title, link, target)
+    from apps.links.tracking import apply as track_links
+
+    provider = target.channel.get_provider()
+    text, link = track_links(target, text, link, provider_key=provider.key, kind=provider.capabilities.kind)
     return Content(
         text=text,
         title=title,

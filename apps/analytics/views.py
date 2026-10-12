@@ -77,6 +77,7 @@ class AnalyticsViewSet(ViewSet):
             qs.select_related("channel", "post").only(
                 "id",
                 "metrics",
+                "link_clicks",
                 "published_at",
                 "external_url",
                 "channel__id",
@@ -89,6 +90,7 @@ class AnalyticsViewSet(ViewSet):
             )
         )
         totals = {k: 0 for k in SUMMED}
+        totals["link_clicks"] = 0
         per_channel, per_day = {}, {}
         tz = ws.tz
         for t in rows:
@@ -101,6 +103,7 @@ class AnalyticsViewSet(ViewSet):
                     "provider": t.channel.provider,
                     "posts": 0,
                     "engagements": 0,
+                    "link_clicks": 0,
                     **{k: 0 for k in SUMMED},
                     "rates": [],
                 },
@@ -113,6 +116,8 @@ class AnalyticsViewSet(ViewSet):
                 v = m.get(k) or 0
                 totals[k] += v
                 ch[k] += v
+            totals["link_clicks"] += t.link_clicks
+            ch["link_clicks"] += t.link_clicks
             eng = m.get("engagements") or 0
             ch["engagements"] += eng
             dd["engagements"] += eng
@@ -156,6 +161,7 @@ class AnalyticsViewSet(ViewSet):
                         "url": t.external_url,
                         "published_at": t.published_at,
                         "metrics": t.metrics,
+                        "link_clicks": t.link_clicks,
                     }
                     for t in top
                 ],

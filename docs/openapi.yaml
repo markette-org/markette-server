@@ -6622,6 +6622,7 @@ components:
           minimum: 0
         ai_enabled:
           type: boolean
+        link_tracking: {}
         organization:
           type: integer
         archived:
@@ -7280,6 +7281,9 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        link_clicks:
+          type: integer
+          readOnly: true
         follows:
           type: integer
           nullable: true
@@ -7308,6 +7312,7 @@ components:
       - follows_detail
       - id
       - last_error
+      - link_clicks
       - metrics
       - metrics_updated_at
       - next_attempt_at
@@ -7542,6 +7547,7 @@ components:
           description: Server switch and, when the org has an AI allowance, whether
             any is left this month.
           readOnly: true
+        link_tracking: {}
         role:
           type: string
           nullable: true
@@ -7599,6 +7605,7 @@ components:
           minimum: 0
         ai_enabled:
           type: boolean
+        link_tracking: {}
         organization:
           type: integer
         archived:

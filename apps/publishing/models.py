@@ -205,6 +205,8 @@ class PostTarget(TimeStamped):
 
     # Latest metrics, denormalised from analytics.MetricSnapshot for fast listing.
     metrics = models.JSONField(default=dict, blank=True)
+    # Clicks on its short links, kept here so lists and analytics need no join.
+    link_clicks = models.PositiveIntegerField(default=0)
     metrics_updated_at = models.DateTimeField(null=True, blank=True)
     next_metrics_at = models.DateTimeField(null=True, blank=True, db_index=True)
 

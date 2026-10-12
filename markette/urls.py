@@ -11,6 +11,7 @@ from apps.channels import webhooks as channel_webhooks
 from apps.channels.views import ChannelViewSet, oauth_callback, providers
 from apps.core import views as core_views
 from apps.insights.views import InsightsViewSet
+from apps.links.views import follow as follow_short_link
 from apps.notifications.views import DestinationViewSet
 from apps.publishing.views import (
     CalendarViewSet,
@@ -51,6 +52,7 @@ router.register("notifications", DestinationViewSet, basename="notification")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("l/<str:code>", follow_short_link),
     path("api/auth/register/", register),
     path("api/auth/token/", PasswordTokenView.as_view()),
     path("api/auth/token/refresh/", TokenRefreshView.as_view()),

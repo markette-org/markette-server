@@ -1,3 +1,4 @@
+import re
 import zoneinfo
 
 from django.contrib.auth import get_user_model
@@ -129,6 +130,7 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "min_gap_minutes",
             "ai_enabled",
             "ai_available",
+            "link_tracking",
             "role",
             "organization",
             "organization_name",
@@ -156,6 +158,30 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             return None
         m = OrgMembership.objects.filter(organization_id=obj.organization_id, user=request.user).first()
         return m.role if m else None
+
+    def validate_link_tracking(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Must be an object.")
+        out = {}
+        for key in ("utm", "short_links"):
+            if key in value:
+                if not isinstance(value[key], bool):
+                    raise serializers.ValidationError({key: "Must be true or false."})
+                out[key] = value[key]
+        medium = str(value.get("utm_medium") or "social").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", medium):
+            raise serializers.ValidationError({"utm_medium": "Letters, digits, dots, dashes or underscores."})
+        out["utm_medium"] = medium
+        domains = []
+        for d in value.get("domains") or []:
+            d = str(d).strip().lower()
+            d = re.sub(r"^https?://", "", d).split("/")[0].removeprefix("www.")
+            if d and not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", d):
+                raise serializers.ValidationError({"domains": f"Not a domain: {d}"})
+            if d and d not in domains:
+                domains.append(d)
+        out["domains"] = domains[:30]
+        return out
 
     def get_is_archived(self, obj) -> bool:
         return obj.archived_at is not None

@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "apps.billing",
     "apps.sso",
     "apps.notifications",
+    "apps.links",
 ]
 
 MIDDLEWARE = [
@@ -286,6 +287,8 @@ STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", "")
 
 # --- MCP server ---------------------------------------------------------------
 # Public URL of the MCP endpoint (served by the "mcp" container behind nginx at /mcp).
+# Base of short links (/l/<code>): a short domain pointing at the API, if you have one.
+SHORT_LINK_BASE = env("SHORT_LINK_BASE", PUBLIC_API_URL).rstrip("/")
 PUBLIC_MCP_URL = env("PUBLIC_MCP_URL", f"{PUBLIC_API_URL}/mcp")
 
 # --- AI ----------------------------------------------------------------------
