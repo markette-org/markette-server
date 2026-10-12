@@ -126,6 +126,11 @@ TAGS = [
     {"name": "teams", "description": "Publishing teams: channel access and approval."},
     {"name": "analytics", "description": "Metrics per post, channel and period."},
     {"name": "insights", "description": "Best times to post and AI assistance."},
+    {
+        "name": "notifications",
+        "description": "Where the workspace hears about publications and problems: email, a Telegram bot, "
+        "signed webhooks (admins only).",
+    },
     {"name": "billing", "description": "Plans and subscriptions (Stripe)."},
     {"name": "providers", "description": "The networks and sites Markette can publish to, with their limits."},
     {"name": "platform", "description": "Installation administration (superadmins only)."},

@@ -21,9 +21,11 @@ from django.utils import timezone
 
 from apps.channels.models import ChannelStatus
 from apps.channels.providers import Content, MediaItem, ProviderError
+from apps.notifications.events import emit_for_post, emit_for_target
+from apps.notifications.models import Event
 from apps.platform import conf
 
-from .models import PostTarget, TargetStatus
+from .models import PostStatus, PostTarget, TargetStatus
 
 log = logging.getLogger(__name__)
 DISPATCH_BATCH = 200
@@ -124,6 +126,7 @@ def dispatch_due_targets():
         t.last_error = f"Channel {t.channel.name} needs to be reconnected."
         t.save(update_fields=["status", "last_error", "updated_at"])
         t.post.refresh_status()
+        emit_for_target(t, Event.FAILED)
     # Followers whose publication was deleted would wait forever.
     orphans = PostTarget.objects.filter(status=TargetStatus.SCHEDULED, scheduled_at__isnull=True, follows__isnull=True)
     for t in orphans.select_related("post"):
@@ -131,6 +134,7 @@ def dispatch_due_targets():
         t.last_error = "The publication it was waiting for was deleted."
         t.save(update_fields=["status", "last_error", "updated_at"])
         t.post.refresh_status()
+        emit_for_target(t, Event.FAILED)
     return len(ids)
 
 
@@ -198,7 +202,10 @@ def publish_target(target_id):
         except ProviderError as exc:
             target.last_error = f"Published, but the first comment could not be posted: {exc}"[:4000]
     target.save()
-    target.post.refresh_status()
+    was = target.post.status
+    if target.post.refresh_status() == PostStatus.PUBLISHED and was != PostStatus.PUBLISHED:
+        emit_for_post(target.post, Event.POST_PUBLISHED)
+    emit_for_target(target, Event.PUBLISHED)
     log.info("Published target %s on %s: %s", target.pk, channel.provider, result.url)
     from .scheduling import release_followers
 
@@ -243,6 +250,7 @@ def mark_unconfirmed(target, reason):
     from .scheduling import note_followers
 
     note_followers(target, f"Waiting for {target.channel.name}, whose publication needs checking.")
+    emit_for_target(target, Event.UNCONFIRMED)
     log.warning("Publishing target %s is unconfirmed: %s", target.pk, reason)
     return target.status
 
@@ -269,6 +277,7 @@ def _handle_failure(target, exc: ProviderError, provider=None, started=None):
     if target.status == TargetStatus.FAILED:
         from .scheduling import note_followers
 
+        emit_for_target(target, Event.FAILED)
         note_followers(target, f"Waiting for {target.channel.name}, which failed. Retry it to continue.")
     log.warning("Publishing target %s failed (%s): %s", target.pk, target.status, exc)
     return target.status

@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "apps.platform",
     "apps.billing",
     "apps.sso",
+    "apps.notifications",
 ]
 
 MIDDLEWARE = [
@@ -221,6 +222,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.channels.tasks.refresh_expiring_tokens",
         "schedule": 600.0,
     },
+    "retry-notifications": {
+        "task": "apps.notifications.tasks.retry_due_deliveries",
+        "schedule": 60.0,
+    },
+    "daily-digests": {
+        "task": "apps.notifications.tasks.send_daily_digests",
+        "schedule": crontab(minute=0),
+    },
+    "prune-notifications": {
+        "task": "apps.notifications.tasks.prune_deliveries",
+        "schedule": crontab(minute=25, hour=4),
+    },
     "rebuild-best-times": {
         "task": "apps.insights.tasks.rebuild_all_best_times",
         "schedule": crontab(minute=40, hour=4),
@@ -256,6 +269,15 @@ REDDIT_USER_AGENT = env("REDDIT_USER_AGENT", "")
 # Slack app for "Add to Slack" (optional: without it users paste a bot token)
 SLACK_CLIENT_ID = env("SLACK_CLIENT_ID", "")
 SLACK_CLIENT_SECRET = env("SLACK_CLIENT_SECRET", "")
+
+# --- Email (notifications) -----------------------------------------------------
+# Without EMAIL_HOST, email notifications are unavailable (Telegram and webhooks still work).
+EMAIL_HOST = env("EMAIL_HOST", "")
+EMAIL_PORT = int(env("EMAIL_PORT", 587))
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "Markette <noreply@localhost>")
 
 # --- Billing (Stripe) -------------------------------------------------------
 # Also editable in Platform → Settings. Webhook endpoint: {PUBLIC_API_URL}/api/billing/webhook/

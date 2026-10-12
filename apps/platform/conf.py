@@ -33,6 +33,11 @@ OVERRIDABLE = {
     "AI_PRICE_INPUT_PER_MTOK": float,
     "AI_PRICE_OUTPUT_PER_MTOK": float,
     "PUBLISH_MAX_ATTEMPTS": int,
+    "EMAIL_HOST": str,
+    "EMAIL_PORT": int,
+    "EMAIL_HOST_USER": str,
+    "EMAIL_USE_TLS": bool,
+    "DEFAULT_FROM_EMAIL": str,
 }
 SECRETS = (
     "X_CLIENT_SECRET",
@@ -45,6 +50,7 @@ SECRETS = (
     "AI_API_KEY",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
+    "EMAIL_HOST_PASSWORD",
 )
 AI_PROVIDERS = ("openrouter", "openai_compatible")
 AI_EFFORTS = ("minimal", "low", "medium", "high")

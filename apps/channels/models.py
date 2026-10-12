@@ -103,9 +103,15 @@ class Channel(TimeStamped):
         return access.workspace.tz if access else zoneinfo.ZoneInfo("UTC")
 
     def mark_needs_reauth(self, message):
+        newly = self.status != ChannelStatus.NEEDS_REAUTH
         self.status = ChannelStatus.NEEDS_REAUTH
         self.last_error = message[:2000]
         self.save(update_fields=["status", "last_error", "updated_at"])
+        if newly:
+            from apps.notifications.events import emit_for_channel
+            from apps.notifications.models import Event
+
+            emit_for_channel(self, Event.RECONNECT)
 
 
 class ChannelAccess(models.Model):

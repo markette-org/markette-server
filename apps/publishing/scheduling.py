@@ -155,6 +155,11 @@ def note_followers(source: PostTarget, message: str, *, fail=False):
             fields.append("status")
         t.save(update_fields=fields)
         t.post.refresh_status()
+        if fail:
+            from apps.notifications.events import emit_for_target
+            from apps.notifications.models import Event
+
+            emit_for_target(t, Event.FAILED)
 
 
 def check_follow_chain(target: PostTarget):

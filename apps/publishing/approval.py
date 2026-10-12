@@ -11,10 +11,16 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from apps.notifications.events import emit_for_post
+from apps.notifications.models import Event
 from apps.teams.access import can_review, needs_approval
 
 from . import scheduling
 from .models import ApprovalStatus, PostReview, ReviewAction, TargetStatus
+
+
+def _name(user):
+    return user.name or user.email
 
 
 def _encode(request):
@@ -60,6 +66,7 @@ def schedule_or_submit(post, membership, request, comment=""):
     post.submitted_at = timezone.now()
     post.save(update_fields=["approval_status", "pending_schedule", "submitted_by", "submitted_at", "updated_at"])
     PostReview.objects.create(post=post, user=membership.user, action=ReviewAction.SUBMITTED, comment=comment)
+    emit_for_post(post, Event.APPROVAL_REQUESTED, by=_name(membership.user), comment=comment)
     return True
 
 
@@ -74,6 +81,7 @@ def approve(post, membership, comment=""):
     post.reviewed_at = timezone.now()
     post.save(update_fields=["approval_status", "reviewed_by", "reviewed_at", "updated_at"])
     PostReview.objects.create(post=post, user=membership.user, action=ReviewAction.APPROVED, comment=comment)
+    emit_for_post(post, Event.APPROVED, by=_name(membership.user), comment=comment)
     stored = post.pending_schedule
     if stored:
         post.pending_schedule = None
@@ -101,6 +109,7 @@ def request_changes(post, membership, comment):
     post.reviewed_at = timezone.now()
     post.save(update_fields=["approval_status", "reviewed_by", "reviewed_at", "updated_at"])
     PostReview.objects.create(post=post, user=membership.user, action=ReviewAction.CHANGES_REQUESTED, comment=comment)
+    emit_for_post(post, Event.CHANGES_REQUESTED, by=_name(membership.user), comment=comment)
 
 
 def reset_after_edit(post, membership):

@@ -2196,6 +2196,319 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/notifications/:
+    get:
+      operationId: notifications_list
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - notifications
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Destination'
+          description: ''
+    post:
+      operationId: notifications_create
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+  /api/notifications/{id}/:
+    get:
+      operationId: notifications_retrieve
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this destination.
+        required: true
+      tags:
+      - notifications
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+    put:
+      operationId: notifications_update
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this destination.
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+    patch:
+      operationId: notifications_partial_update
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this destination.
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDestinationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDestinationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDestinationRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+    delete:
+      operationId: notifications_destroy
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this destination.
+        required: true
+      tags:
+      - notifications
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/notifications/{id}/deliveries/:
+    get:
+      operationId: notifications_deliveries_retrieve
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this destination.
+        required: true
+      tags:
+      - notifications
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+  /api/notifications/{id}/rotate-secret/:
+    post:
+      operationId: notifications_rotate_secret_create
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this destination.
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+  /api/notifications/{id}/test/:
+    post:
+      operationId: notifications_test_create
+      description: Sends a test notification right away and reports what happened.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this destination.
+        required: true
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+  /api/notifications/catalog/:
+    get:
+      operationId: notifications_catalog_retrieve
+      description: 'Where the workspace''s notifications go. Admins only: destinations
+        hold addresses and tokens.'
+      tags:
+      - notifications
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+  /api/notifications/telegram-chats/:
+    post:
+      operationId: notifications_telegram_chats_create
+      description: 'Lists the chats a bot can post to: send it a message (or add it
+        to a group/channel) first.'
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
   /api/organizations/:
     get:
       operationId: organizations_list
@@ -5442,6 +5755,95 @@ components:
         * `active` - Active
         * `needs_reauth` - Needs re-authentication
         * `disabled` - Disabled
+    Destination:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        name:
+          type: string
+          maxLength: 120
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventsEnum'
+        enabled:
+          type: boolean
+        config: {}
+        has_bot_token:
+          type: boolean
+          readOnly: true
+        last_sent_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        last_error:
+          type: string
+          readOnly: true
+        failures:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - failures
+      - has_bot_token
+      - id
+      - kind
+      - last_error
+      - last_sent_at
+      - name
+    DestinationRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventsEnum'
+        enabled:
+          type: boolean
+        config: {}
+        bot_token:
+          type: string
+          writeOnly: true
+      required:
+      - kind
+      - name
+    EventsEnum:
+      enum:
+      - publication.published
+      - post.published
+      - publication.failed
+      - publication.unconfirmed
+      - channel.needs_reconnect
+      - approval.requested
+      - approval.approved
+      - approval.changes_requested
+      - digest.daily
+      type: string
+      description: |-
+        * `publication.published` - A publication went live
+        * `post.published` - Every channel of a post is live
+        * `publication.failed` - A publication failed
+        * `publication.unconfirmed` - A publication needs checking
+        * `channel.needs_reconnect` - A channel needs to be reconnected
+        * `approval.requested` - A post waits for approval
+        * `approval.approved` - A post was approved
+        * `approval.changes_requested` - Changes were requested on a post
+        * `digest.daily` - Daily summary (8:00 in the workspace's time zone)
     FollowModeEnum:
       enum:
       - delay
@@ -5511,6 +5913,16 @@ components:
           - $ref: '#/components/schemas/BlankEnum'
       required:
       - email
+    KindEnum:
+      enum:
+      - email
+      - telegram
+      - webhook
+      type: string
+      description: |-
+        * `email` - Email
+        * `telegram` - Telegram bot
+        * `webhook` - Webhook
     MediaAsset:
       type: object
       properties:
@@ -5950,6 +6362,25 @@ components:
         color:
           type: string
           maxLength: 9
+    PatchedDestinationRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventsEnum'
+        enabled:
+          type: boolean
+        config: {}
+        bot_token:
+          type: string
+          writeOnly: true
     PatchedMediaAssetRequest:
       type: object
       properties:
@@ -7230,6 +7661,9 @@ tags:
   description: Metrics per post, channel and period.
 - name: insights
   description: Best times to post and AI assistance.
+- name: notifications
+  description: 'Where the workspace hears about publications and problems: email,
+    a Telegram bot, signed webhooks (admins only).'
 - name: billing
   description: Plans and subscriptions (Stripe).
 - name: providers
