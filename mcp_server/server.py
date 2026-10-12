@@ -227,6 +227,7 @@ async def create_post(
     follows_target_id: int | None = None,
     follow_mode: Literal["delay", "queue", "best_time"] = "delay",
     follow_delay_minutes: int = 0,
+    as_thread: bool = False,
 ) -> dict:
     """Create a draft post for the given channels (nothing is published yet).
 
@@ -238,6 +239,9 @@ async def create_post(
     waits until that publication is live, then goes out with its URL in place of {url} (and its
     title in place of {title}); without {url} the URL is added at the end. follow_mode picks when:
     "delay" (follow_delay_minutes after it), "queue" (next queue slot after it) or "best_time".
+
+    as_thread: on X, Bluesky, Mastodon and Threads, text longer than the limit goes out as a numbered
+    thread of replies (break posts yourself with lines containing only ---).
     """
     overrides = channel_overrides or {}
     follow = (
@@ -250,7 +254,15 @@ async def create_post(
         "body": body,
         "link": link,
         "tags": tags or [],
-        "targets": [{"channel": cid, "body": overrides.get(str(cid), ""), **follow} for cid in channel_ids],
+        "targets": [
+            {
+                "channel": cid,
+                "body": overrides.get(str(cid), ""),
+                **follow,
+                **({"options": {"thread": True}} if as_thread else {}),
+            }
+            for cid in channel_ids
+        ],
     }
     return _post_summary(await api("POST", "posts/", workspace=workspace, json=payload))
 

@@ -174,6 +174,8 @@ def publish_target(target_id):
         if problems:
             raise ProviderError(" ".join(problems))
         content, first_comment = provider.prepare_first_comment(content)
+        parts = provider.thread_parts(content)
+        content = parts[0]
         result = _earlier_copy(target, provider, content)
         if result is None:
             sending = True  # only a lost answer from here on may have created the post
@@ -205,7 +207,11 @@ def publish_target(target_id):
             target.extra["first_comment_id"] = provider.post_first_comment(result.external_id, first_comment)
         except ProviderError as exc:
             target.last_error = f"Published, but the first comment could not be posted: {exc}"[:4000]
+    if len(parts) > 1:
+        target.extra["thread"] = {"total": len(parts), "posts": [_thread_entry(result)]}
     target.save()
+    if len(parts) > 1:
+        continue_thread(target, provider, parts)
     was = target.post.status
     if target.post.refresh_status() == PostStatus.PUBLISHED and was != PostStatus.PUBLISHED:
         emit_for_post(target.post, Event.POST_PUBLISHED)
@@ -216,6 +222,47 @@ def publish_target(target_id):
     with transaction.atomic():
         release_followers(target)
     return "published"
+
+
+def _thread_entry(result):
+    return {"id": result.external_id, "url": result.url, "cid": result.extra.get("cid")}
+
+
+def continue_thread(target, provider=None, parts=None):
+    """Posts the thread's remaining parts as replies, saving progress after each one.
+
+    A failure stops the thread (the start is live, so nothing is retried automatically); the
+    post page offers to continue it.
+    """
+    from apps.channels.providers.base import PublishResult
+
+    provider = provider or target.channel.get_provider()
+    if parts is None:
+        content, _ = provider.prepare_first_comment(build_content(target))
+        parts = provider.thread_parts(content)
+    thread = target.extra["thread"]
+    done = thread["posts"]
+
+    def as_result(entry):
+        return PublishResult(external_id=entry["id"], url=entry.get("url", ""), extra={"cid": entry.get("cid")})
+
+    root = as_result(done[0])
+    for i in range(len(done), len(parts)):
+        try:
+            reply = provider.publish_reply(parts[i], parent=as_result(done[-1]), root=root)
+        except ProviderError as exc:
+            maybe = " It may have been posted: check before continuing." if exc.uncertain else ""
+            target.last_error = (
+                f"Published, but the thread stopped after part {len(done)} of {len(parts)}: {exc}.{maybe}"[:4000]
+            )
+            target.save(update_fields=["last_error", "extra", "updated_at"])
+            return False
+        done.append(_thread_entry(reply))
+        target.save(update_fields=["extra", "updated_at"])
+    if target.last_error.startswith("Published, but the thread stopped"):
+        target.last_error = ""
+        target.save(update_fields=["last_error", "updated_at"])
+    return True
 
 
 class CannotCheck(Exception):

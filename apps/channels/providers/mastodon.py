@@ -1,6 +1,7 @@
 """Mastodon (and compatible servers): one OAuth app registered per instance."""
 
 import time
+from dataclasses import replace
 from urllib.parse import urlencode, urlparse
 
 from django.conf import settings
@@ -43,6 +44,7 @@ class MastodonProvider(BaseProvider):
         max_chars=500,
         count_mode="mastodon",
         max_media=4,
+        supports_threads=True,
         instance_url=True,
         metric_names=("likes", "comments", "shares"),
     )
@@ -155,11 +157,16 @@ class MastodonProvider(BaseProvider):
             data["spoiler_text"] = cw
         if lang := content.options.get("language"):
             data["language"] = lang
+        if parent := content.options.get("_in_reply_to_id"):
+            data["in_reply_to_id"] = parent
         headers = {**self.headers}
         if content.idempotency_key:
             headers["Idempotency-Key"] = content.idempotency_key
         status = self.http("POST", f"{self.base}/api/v1/statuses", headers=headers, json=data).json()
         return PublishResult(external_id=status["id"], url=status.get("url") or status.get("uri", ""))
+
+    def publish_reply(self, content, parent, root):
+        return self.publish(replace(content, options={**content.options, "_in_reply_to_id": parent.external_id}))
 
     def delete(self, external_id):
         self.http("DELETE", f"{self.base}/api/v1/statuses/{external_id}", headers=self.headers)

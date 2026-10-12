@@ -1,6 +1,7 @@
 """Bluesky via AT Protocol XRPC, authenticated with an app password."""
 
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from .base import (
@@ -33,6 +34,7 @@ class BlueskyProvider(BaseProvider):
         max_chars=300,
         count_mode="graphemes",
         max_media=4,
+        supports_threads=True,
         auth="credentials",
         metric_names=("likes", "comments", "shares"),
     )
@@ -174,6 +176,8 @@ class BlueskyProvider(BaseProvider):
         }
         if langs := content.options.get("langs"):
             record["langs"] = langs
+        if reply := content.options.get("_reply"):
+            record["reply"] = reply
         if facets := self.facets(content.text):
             record["facets"] = facets
         videos = [m for m in content.media if m.is_video]
@@ -201,6 +205,13 @@ class BlueskyProvider(BaseProvider):
             },
         ).json()
         return self._result(res["uri"], res.get("cid"))
+
+    def publish_reply(self, content, parent, root):
+        def ref(r):
+            return {"uri": r.external_id, "cid": r.extra.get("cid")}
+
+        reply = {"root": ref(root), "parent": ref(parent)}
+        return self.publish(replace(content, options={**content.options, "_reply": reply}))
 
     def _result(self, uri, cid):
         rkey = uri.rsplit("/", 1)[-1]

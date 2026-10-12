@@ -390,6 +390,21 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
             dispatch_due_targets.delay()
         return Response(TargetSerializer(target, context=self.get_serializer_context()).data)
 
+    @action(detail=True, methods=["post"], url_path="continue-thread")
+    def continue_thread(self, request, pk=None):
+        """Posts the remaining parts of a thread that stopped part-way."""
+        from .tasks import continue_thread
+
+        target = self.get_object()
+        thread = (target.extra or {}).get("thread")
+        if target.status != TargetStatus.PUBLISHED or not thread or len(thread["posts"]) >= thread["total"]:
+            raise ValidationError("This publication has no unfinished thread.")
+        try:
+            continue_thread(target)
+        except ProviderError as exc:
+            raise ValidationError(str(exc)) from exc
+        return Response(TargetSerializer(target, context=self.get_serializer_context()).data)
+
     @action(detail=True, methods=["post"], url_path="delete-remote")
     def delete_remote(self, request, pk=None):
         target = self.get_object()

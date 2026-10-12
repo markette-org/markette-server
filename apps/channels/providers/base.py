@@ -8,7 +8,7 @@ import hashlib
 import logging
 import re
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -62,6 +62,8 @@ class Capabilities:
     supports_first_comment: bool = False
     first_comment_max: int | None = None
     instance_url: bool = False  # user must provide a server/site URL
+    # Long text can go out as a thread of replies (target option "thread").
+    supports_threads: bool = False
 
 
 @dataclass
@@ -202,6 +204,7 @@ class BaseProvider:
             "credential_fields": [f.__dict__ for f in cls.credential_fields],
             "supports_first_comment": caps.supports_first_comment,
             "first_comment_max": caps.first_comment_max,
+            "supports_threads": caps.supports_threads,
         }
 
     # --- connection ------------------------------------------------------
@@ -225,13 +228,13 @@ class BaseProvider:
         caps = self.capabilities
         problems = []
         comment = ""
-        posted_text = content.text
+        posted = content
         if caps.supports_first_comment:
             from copy import deepcopy
 
-            post, comment = self.prepare_first_comment(deepcopy(content))
-            posted_text = post.text  # links may move to the comment
-        if caps.max_chars and measure(posted_text, caps.count_mode) > caps.max_chars:
+            posted, comment = self.prepare_first_comment(deepcopy(content))  # links may move to the comment
+        parts = self.thread_parts(posted)
+        if caps.max_chars and any(measure(p.text, caps.count_mode) > caps.max_chars for p in parts):
             problems.append(f"Text exceeds {caps.max_chars} characters.")
         if caps.first_comment_max and len(comment) > caps.first_comment_max:
             problems.append(f"The first comment exceeds {caps.first_comment_max} characters.")
@@ -283,6 +286,28 @@ class BaseProvider:
                 content.link = ""
                 comment = "\n".join(filter(None, [comment, *urls]))
         return content, comment
+
+    # --- threads -----------------------------------------------------------
+    def thread_parts(self, content: Content) -> list[Content]:
+        """The posts ``content`` goes out as: itself, or a thread when the target asks for one."""
+        from .text import split_thread
+
+        caps = self.capabilities
+        opts = content.options or {}
+        if not (caps.supports_threads and opts.get("thread") and caps.max_chars):
+            return [content]
+        texts = split_thread(content.text, caps.max_chars, caps.count_mode, opts.get("thread_numbering", True))
+        if len(texts) == 1:
+            return [content]
+        rest = {k: v for k, v in opts.items() if k not in ("first_comment", "links_in_first_comment")}
+        return [replace(content, text=texts[0])] + [
+            Content(text=t, options=rest, idempotency_key=f"{content.idempotency_key}-{i}")
+            for i, t in enumerate(texts[1:], 2)
+        ]
+
+    def publish_reply(self, content: Content, parent: PublishResult, root: PublishResult) -> PublishResult:
+        """Publishes ``content`` as a reply to ``parent`` (the next post of a thread started by ``root``)."""
+        raise ProviderError(f"{self.label} does not support threads.")
 
     def post_first_comment(self, external_id: str, text: str) -> str:
         """Comment under a published post; returns the comment id."""

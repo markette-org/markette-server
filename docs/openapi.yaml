@@ -4789,6 +4789,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/Target'
           description: ''
+  /api/targets/{id}/continue-thread/:
+    post:
+      operationId: targets_continue_thread_create
+      description: Posts the remaining parts of a thread that stopped part-way.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post target.
+        required: true
+      tags:
+      - targets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TargetRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Target'
+          description: ''
   /api/targets/{id}/delete-remote/:
     post:
       operationId: targets_delete_remote_create

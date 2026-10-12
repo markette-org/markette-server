@@ -28,6 +28,7 @@ class ThreadsProvider(BaseProvider):
     capabilities = Capabilities(
         max_chars=500,
         max_media=20,
+        supports_threads=True,
         supports_first_comment=True,
         first_comment_max=500,
         metric_names=("impressions", "likes", "comments", "shares"),
@@ -189,6 +190,11 @@ class ThreadsProvider(BaseProvider):
             )["id"]
             self._wait(creation)
         media_id = self._publish_container(creation)
+        permalink = self._g("GET", media_id, fields="permalink").get("permalink", "")
+        return PublishResult(external_id=media_id, url=permalink)
+
+    def publish_reply(self, content, parent, root):
+        media_id = self._publish_container(self._container(text=content.text.strip(), reply_to=parent.external_id))
         permalink = self._g("GET", media_id, fields="permalink").get("permalink", "")
         return PublishResult(external_id=media_id, url=permalink)
 

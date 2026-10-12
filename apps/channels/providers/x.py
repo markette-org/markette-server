@@ -1,5 +1,6 @@
 """X (Twitter) via API v2 with OAuth 2.0 user context (PKCE)."""
 
+from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -33,6 +34,7 @@ class XProvider(BaseProvider):
         max_chars=280,
         count_mode="x",
         max_media=4,
+        supports_threads=True,
         metric_names=("impressions", "likes", "comments", "shares", "saves"),
     )
 
@@ -182,6 +184,9 @@ class XProvider(BaseProvider):
         data = self.http("POST", f"{API}/tweets", headers=self.headers, json=body).json()["data"]
         username = (self.channel.handle or "i").lstrip("@")
         return PublishResult(external_id=data["id"], url=f"https://x.com/{username}/status/{data['id']}")
+
+    def publish_reply(self, content, parent, root):
+        return self.publish(replace(content, options={**content.options, "reply_to_id": parent.external_id}))
 
     def delete(self, external_id):
         self.http("DELETE", f"{API}/tweets/{external_id}", headers=self.headers)
