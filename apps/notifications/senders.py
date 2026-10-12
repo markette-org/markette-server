@@ -105,6 +105,24 @@ def send_email(destination, payload, uid):
     return None
 
 
+def send_mail_message(to, subject, text, html_body, attachments=()):
+    """Sends one email (reports): raises DeliveryError on failure."""
+    msg = EmailMultiAlternatives(
+        subject=f"[Markette] {subject}"[:250],
+        body=text,
+        from_email=conf.get("DEFAULT_FROM_EMAIL") or settings.DEFAULT_FROM_EMAIL,
+        to=list(to),
+        connection=_connection(),
+    )
+    msg.attach_alternative(html_body, "text/html")
+    for name, content, mime in attachments:
+        msg.attach(name, content, mime)
+    try:
+        msg.send()
+    except Exception as exc:  # noqa: BLE001
+        raise DeliveryError(f"Email could not be sent: {exc}", retryable=True) from exc
+
+
 # --- Telegram ------------------------------------------------------------------------------
 def telegram_call(token, method, **params):
     try:

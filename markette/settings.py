@@ -231,6 +231,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.send_daily_digests",
         "schedule": crontab(minute=0),
     },
+    "send-reports": {
+        "task": "apps.analytics.tasks.send_due_reports",
+        "schedule": crontab(minute=5),
+    },
     "prune-notifications": {
         "task": "apps.notifications.tasks.prune_deliveries",
         "schedule": crontab(minute=25, hour=4),

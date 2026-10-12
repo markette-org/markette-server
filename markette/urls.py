@@ -6,6 +6,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from apps.analytics.report_views import ReportViewSet, public_report
 from apps.analytics.views import AnalyticsViewSet
 from apps.channels import webhooks as channel_webhooks
 from apps.channels.views import ChannelViewSet, oauth_callback, providers
@@ -13,6 +14,7 @@ from apps.core import views as core_views
 from apps.insights.views import InsightsViewSet
 from apps.links.views import follow as follow_short_link
 from apps.notifications.views import DestinationViewSet
+from apps.publishing.public_views import review as public_review
 from apps.publishing.views import (
     CalendarViewSet,
     CampaignViewSet,
@@ -47,6 +49,7 @@ router.register("posts", PostViewSet, basename="post")
 router.register("targets", TargetViewSet, basename="target")
 router.register("calendar", CalendarViewSet, basename="calendar")
 router.register("analytics", AnalyticsViewSet, basename="analytics")
+router.register("reports", ReportViewSet, basename="report")
 router.register("insights", InsightsViewSet, basename="insights")
 router.register("notifications", DestinationViewSet, basename="notification")
 
@@ -61,6 +64,8 @@ urlpatterns = [
     path("api/auth/tokens/<int:token_id>/", core_views.revoke_token),
     path("api/invitations/accept/", accept_invitation),
     path("api/providers/", providers),
+    path("api/public/review/<str:token>/", public_review),
+    path("api/public/reports/<str:token>/", public_report),
     path("api/oauth/<str:provider>/callback", oauth_callback),
     path("api/channels/whatsapp/webhook/", channel_webhooks.whatsapp_webhook),
     path("api/channels/qq/webhook/<str:app_id>/", channel_webhooks.qq_webhook),

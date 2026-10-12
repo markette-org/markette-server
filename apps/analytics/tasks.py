@@ -102,3 +102,28 @@ def snapshot_channel_audiences():
         channel.followers_count = followers
         channel.save(update_fields=["followers_count", "updated_at"])
         AudienceSnapshot.objects.update_or_create(channel=channel, date=today, defaults={"followers": followers})
+
+
+@shared_task
+def send_due_reports():
+    """Hourly: weekly reports go out on Monday at 8:00 and monthly ones on the 1st, workspace time."""
+    from apps.notifications.senders import DeliveryError
+
+    from .models import Report
+    from .reports import due, send
+
+    sent = 0
+    for report in Report.objects.exclude(frequency="").select_related("workspace"):
+        ws = report.workspace
+        if not ws.is_live:
+            continue
+        local = timezone.now().astimezone(ws.tz)
+        if not due(report, local):
+            continue
+        try:
+            send(report, local.date())
+            sent += 1
+        except DeliveryError as exc:
+            report.last_error = str(exc)[:2000]
+            report.save(update_fields=["last_error"])
+    return sent

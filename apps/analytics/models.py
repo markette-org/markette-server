@@ -49,3 +49,37 @@ class AudienceSnapshot(models.Model):
     class Meta:
         ordering = ["date"]
         constraints = [models.UniqueConstraint(fields=["channel", "date"], name="uniq_audience_day")]
+
+
+class ReportPeriod(models.TextChoices):
+    LAST_7 = "7d", "Last 7 days"
+    LAST_30 = "30d", "Last 30 days"
+    PREVIOUS_WEEK = "previous_week", "Previous week (Monday–Sunday)"
+    PREVIOUS_MONTH = "previous_month", "Previous month"
+
+
+class ReportFrequency(models.TextChoices):
+    NEVER = "", "Not emailed"
+    WEEKLY = "weekly", "Every Monday"
+    MONTHLY = "monthly", "On the 1st of the month"
+
+
+class Report(models.Model):
+    """A saved analytics report: emailed on a schedule and/or shared as a read-only page."""
+
+    workspace = models.ForeignKey("tenants.Workspace", on_delete=models.CASCADE, related_name="reports")
+    name = models.CharField(max_length=120)
+    period = models.CharField(max_length=20, choices=ReportPeriod.choices, default=ReportPeriod.LAST_30)
+    frequency = models.CharField(max_length=10, choices=ReportFrequency.choices, blank=True, default="")
+    recipients = models.JSONField(default=list, blank=True)
+    campaign = models.ForeignKey("publishing.Campaign", null=True, blank=True, on_delete=models.SET_NULL)
+    channels = models.JSONField(default=list, blank=True)  # channel ids; empty = all
+    # Anyone with the link sees the report (read-only). Null = not shared.
+    share_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_by = models.ForeignKey("core.User", null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name", "pk"]

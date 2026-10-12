@@ -254,10 +254,40 @@ class PostReview(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     action = models.CharField(max_length=20, choices=ReviewAction.choices)
     comment = models.TextField(blank=True)
+    # A client who reviewed through a review link (no account): the name they gave.
+    reviewer_name = models.CharField(max_length=120, blank=True)
+    review_link = models.ForeignKey("ReviewLink", null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["created_at"]
+
+
+def _review_token():
+    import secrets
+
+    return secrets.token_urlsafe(24)
+
+
+class ReviewLink(models.Model):
+    """A secret link that lets someone without an account (a client) approve a post or ask for changes."""
+
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="review_links")
+    token = models.CharField(max_length=64, unique=True, default=_review_token)
+    label = models.CharField(max_length=120, blank=True)  # who it was sent to, e.g. "Acme marketing"
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def active(self):
+        from django.utils import timezone
+
+        return self.revoked_at is None and self.expires_at > timezone.now()
 
 
 class PostingSlot(TimeStamped):

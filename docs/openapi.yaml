@@ -109,6 +109,47 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/analytics/export/:
+    get:
+      operationId: analytics_export_retrieve
+      summary: Every publication of the period with its numbers, as CSV
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: query
+        name: channels
+        schema:
+          type: string
+        description: Channel ids
+      - in: query
+        name: from
+        schema:
+          type: string
+        description: YYYY-MM-DD
+      - in: query
+        name: to
+        schema:
+          type: string
+        description: YYYY-MM-DD
+      tags:
+      - analytics
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/analytics/overview/:
     get:
       operationId: analytics_overview_retrieve
@@ -4213,6 +4254,127 @@ paths:
               schema:
                 $ref: '#/components/schemas/Post'
           description: ''
+  /api/posts/{id}/review-links/:
+    get:
+      operationId: posts_review_links_retrieve
+      description: Links that let someone without an account approve the post or ask
+        for changes.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+    post:
+      operationId: posts_review_links_create
+      description: Links that let someone without an account approve the post or ask
+        for changes.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
+  /api/posts/{id}/review-links/{link_id}/revoke/:
+    post:
+      operationId: posts_review_links_revoke_create
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this post.
+        required: true
+      - in: path
+        name: link_id
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - posts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+          description: ''
   /api/posts/{id}/reviews/:
     get:
       operationId: posts_reviews_retrieve
@@ -4374,6 +4536,362 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/public/reports/{token}/:
+    get:
+      operationId: public_reports_retrieve
+      summary: A shared report (no account)
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - analytics
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/public/review/{token}/:
+    get:
+      operationId: public_review_retrieve
+      summary: Review a post through a review link (no account)
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+    post:
+      operationId: public_review_create
+      summary: Review a post through a review link (no account)
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - posts
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/reports/:
+    get:
+      operationId: reports_list
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - reports
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Report'
+          description: ''
+    post:
+      operationId: reports_create
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      tags:
+      - reports
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+          description: ''
+  /api/reports/{id}/:
+    get:
+      operationId: reports_retrieve
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+          description: ''
+    put:
+      operationId: reports_update
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+          description: ''
+    patch:
+      operationId: reports_partial_update
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedReportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedReportRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedReportRequest'
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+          description: ''
+    delete:
+      operationId: reports_destroy
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/reports/{id}/preview/:
+    get:
+      operationId: reports_preview_retrieve
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+          description: ''
+  /api/reports/{id}/send/:
+    post:
+      operationId: reports_send_create
+      description: 'Saved reports: emailed weekly or monthly with a CSV, and/or shared
+        as a read-only page (admins).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+          description: ''
+  /api/reports/{id}/share/:
+    post:
+      operationId: reports_share_create
+      description: POST creates (or replaces) the public link; DELETE withdraws it.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReportRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+          description: ''
+    delete:
+      operationId: reports_share_destroy
+      description: POST creates (or replaces) the public link; DELETE withdraws it.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this report.
+        required: true
+      tags:
+      - reports
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/slots/:
     get:
       operationId: slots_list
@@ -5941,6 +6459,15 @@ components:
         * `delay` - After a delay
         * `queue` - Next queue slot
         * `best_time` - Best time
+    FrequencyEnum:
+      enum:
+      - weekly
+      - monthly
+      type: string
+      description: |-
+        * `` - Not emailed
+        * `weekly` - Every Monday
+        * `monthly` - On the 1st of the month
     Invitation:
       type: object
       properties:
@@ -6616,6 +7143,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TargetRequest'
+    PatchedReportRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        period:
+          $ref: '#/components/schemas/PeriodEnum'
+        frequency:
+          oneOf:
+          - $ref: '#/components/schemas/FrequencyEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        recipients:
+          type: array
+          items:
+            type: string
+            format: email
+            minLength: 1
+          maxItems: 20
+        campaign:
+          type: integer
+          nullable: true
+        channels: {}
     PatchedSlotRequest:
       type: object
       properties:
@@ -6715,6 +7266,18 @@ components:
         archived:
           type: boolean
           writeOnly: true
+    PeriodEnum:
+      enum:
+      - 7d
+      - 30d
+      - previous_week
+      - previous_month
+      type: string
+      description: |-
+        * `7d` - Last 7 days
+        * `30d` - Last 30 days
+        * `previous_week` - Previous week (Monday–Sunday)
+        * `previous_month` - Previous month
     Plan:
       type: object
       properties:
@@ -7217,6 +7780,80 @@ components:
       required:
       - email
       - password
+    Report:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 120
+        period:
+          $ref: '#/components/schemas/PeriodEnum'
+        frequency:
+          oneOf:
+          - $ref: '#/components/schemas/FrequencyEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        recipients:
+          type: array
+          items:
+            type: string
+            format: email
+          maxItems: 20
+        campaign:
+          type: integer
+          nullable: true
+        channels: {}
+        share_url:
+          type: string
+          nullable: true
+          readOnly: true
+        last_sent_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        last_error:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - last_error
+      - last_sent_at
+      - name
+      - share_url
+    ReportRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        period:
+          $ref: '#/components/schemas/PeriodEnum'
+        frequency:
+          oneOf:
+          - $ref: '#/components/schemas/FrequencyEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        recipients:
+          type: array
+          items:
+            type: string
+            format: email
+            minLength: 1
+          maxItems: 20
+        campaign:
+          type: integer
+          nullable: true
+        channels: {}
+      required:
+      - name
     ScheduleModeEnum:
       enum:
       - exact

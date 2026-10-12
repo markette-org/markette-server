@@ -1,5 +1,6 @@
 import mimetypes
 import re
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
@@ -19,7 +20,17 @@ from apps.tenants.models import Role
 from apps.tenants.tenancy import WorkspaceScopedMixin
 
 from . import approval, scheduling
-from .models import ApprovalStatus, Campaign, MediaAsset, Post, PostingSlot, PostMedia, PostTarget, TargetStatus
+from .models import (
+    ApprovalStatus,
+    Campaign,
+    MediaAsset,
+    Post,
+    PostingSlot,
+    PostMedia,
+    PostTarget,
+    ReviewLink,
+    TargetStatus,
+)
 from .serializers import (
     CalendarItemSerializer,
     CampaignSerializer,
@@ -32,6 +43,20 @@ from .serializers import (
 from .tasks import build_content
 
 URL_RE = re.compile(r"^https?://\S+$")
+
+
+def _review_link_row(link):
+    return {
+        "id": link.pk,
+        "label": link.label,
+        "url": f"{settings.FRONTEND_URL}/review/{link.token}",
+        "created_at": link.created_at,
+        "expires_at": link.expires_at,
+        "revoked": link.revoked_at is not None,
+        "active": link.active,
+        "decisions": link.postreview_set.count(),
+    }
+
 
 ALLOWED_MEDIA = ("image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/quicktime")
 
@@ -190,6 +215,29 @@ class PostViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
         approval.request_changes(post, self.membership, request.data.get("comment", ""))
         return self._fresh(post)
 
+    @action(detail=True, methods=["get", "post"], url_path="review-links")
+    def review_links(self, request, pk=None):
+        """Links that let someone without an account approve the post or ask for changes."""
+        post = self.get_object()
+        if request.method == "POST":
+            try:
+                days = min(max(int(request.data.get("days") or 14), 1), 90)
+            except (TypeError, ValueError):
+                raise ValidationError({"days": "A number of days (1–90)."}) from None
+            ReviewLink.objects.create(
+                post=post,
+                label=str(request.data.get("label") or "")[:120],
+                created_by=request.user,
+                expires_at=timezone.now() + timedelta(days=days),
+            )
+        return Response([_review_link_row(link) for link in post.review_links.all()])
+
+    @action(detail=True, methods=["post"], url_path=r"review-links/(?P<link_id>\d+)/revoke")
+    def revoke_review_link(self, request, pk=None, link_id=None):
+        post = self.get_object()
+        post.review_links.filter(pk=link_id, revoked_at__isnull=True).update(revoked_at=timezone.now())
+        return Response([_review_link_row(link) for link in post.review_links.all()])
+
     @action(detail=True, methods=["get"])
     def reviews(self, request, pk=None):
         post = self.get_object()
@@ -201,7 +249,8 @@ class PostViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
                     "action": r.action,
                     "comment": r.comment,
                     "created_at": r.created_at,
-                    "user": (r.user.name or r.user.email) if r.user else None,
+                    "user": (r.user.name or r.user.email) if r.user else (r.reviewer_name or None),
+                    "via_link": bool(r.reviewer_name),
                 }
                 for r in rows
             ]
