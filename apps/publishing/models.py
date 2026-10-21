@@ -59,6 +59,7 @@ class PostStatus(models.TextChoices):
     PUBLISHED = "published", "Published"
     PARTIAL = "partial", "Partially published"
     UNCONFIRMED = "unconfirmed", "Needs checking"
+    HANDOFF = "handoff", "Ready to upload"
     FAILED = "failed", "Failed"
 
 
@@ -130,6 +131,8 @@ class Post(TimeStamped):
             status = PostStatus.PUBLISHING
         elif any(s == TargetStatus.UNCONFIRMED for s in states):
             status = PostStatus.UNCONFIRMED
+        elif any(s == TargetStatus.HANDOFF for s in states):
+            status = PostStatus.HANDOFF
         elif any(s == TargetStatus.SCHEDULED for s in states):
             status = PostStatus.SCHEDULED
         elif all(s == TargetStatus.DRAFT for s in states):
@@ -160,6 +163,8 @@ class TargetStatus(models.TextChoices):
     PUBLISHED = "published", "Published"
     # The network may have published it but its answer was lost: a person checks before it is retried.
     UNCONFIRMED = "unconfirmed", "Unconfirmed"
+    # No upload API: everything is prepared and a person uploads it on the site (adult platforms).
+    HANDOFF = "handoff", "Ready to upload"
     FAILED = "failed", "Failed"
     CANCELLED = "cancelled", "Cancelled"
 

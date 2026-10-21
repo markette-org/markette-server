@@ -73,11 +73,10 @@ def emit(workspace, event, data):
 
 
 def emit_for_target(target, event):
-    emit(
-        target.post.workspace,
-        event,
-        {"post": post_data(target.post), "publication": publication_data(target)},
-    )
+    data = {"post": post_data(target.post), "publication": publication_data(target)}
+    if event == Event.HANDOFF:
+        data["handoff"] = (target.extra or {}).get("handoff") or {}
+    emit(target.post.workspace, event, data)
 
 
 def emit_for_post(post, event, **extra):
@@ -114,6 +113,18 @@ def render(payload):
     elif event == Event.UNCONFIRMED:
         subject = f"Check {channel}: {title} may or may not be live"
         lines.append(pub.get("error") or "")
+    elif event == Event.HANDOFF:
+        h = data.get("handoff") or {}
+        subject = f"Ready to upload on {channel}: {title}"
+        lines.append(pub.get("error") or "")
+        if h.get("title"):
+            lines.append(f"Title: {h['title']}")
+        if h.get("tags"):
+            lines.append("Tags: " + ", ".join(h["tags"]))
+        lines.extend(f"File: {m['url']}" for m in h.get("media") or [])
+        if h.get("upload_url"):
+            lines.append(f"Upload page: {h['upload_url']}")
+        lines.append("Then paste the new post's address on the post page in Markette.")
     elif event == Event.RECONNECT:
         subject = f"Reconnect {channel}"
         lines.append((data.get("channel") or {}).get("error") or "Its authorization expired or was revoked.")

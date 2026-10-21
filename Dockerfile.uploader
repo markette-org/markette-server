@@ -1,0 +1,11 @@
+# The optional upload bot worker: the server image plus Playwright and Chromium.
+# Built by deploy/build-local.sh when the "uploader" compose profile is on.
+ARG BASE=ghcr.io/markette-org/markette-server:latest
+FROM ${BASE}
+USER root
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright MARKETTE_UPLOADER=1
+RUN uv pip install --python /app/.venv/bin/python playwright==1.55.0 \
+    && /app/.venv/bin/playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+USER markette
+CMD ["celery", "-A", "markette", "worker", "-Q", "uploads", "--concurrency", "1", "--loglevel", "INFO"]

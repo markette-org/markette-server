@@ -388,6 +388,7 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
             TargetStatus.SCHEDULED,
             TargetStatus.FAILED,
             TargetStatus.UNCONFIRMED,
+            TargetStatus.HANDOFF,
         ):
             raise ValidationError("Only pending publications can be cancelled.")
         target.status = TargetStatus.CANCELLED
@@ -400,27 +401,45 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
 
     @action(detail=True, methods=["post"])
     def resolve(self, request, pk=None):
-        """Settles an unconfirmed publication: {"published": true, "url": ...} or {"published": false}."""
+        """Settles a publication a person had to check or upload.
+
+        Unconfirmed: {"published": true, "url"} (it is live) or {"published": false} (publish again).
+        Ready to upload: {"published": true, "url"} (uploaded; the address is required) or
+        {"published": false} (not uploading it: cancelled).
+        """
         target = self.get_object()
-        if target.status != TargetStatus.UNCONFIRMED:
-            raise ValidationError("Only unconfirmed publications need checking.")
+        handoff = target.status == TargetStatus.HANDOFF
+        if target.status not in (TargetStatus.UNCONFIRMED, TargetStatus.HANDOFF):
+            raise ValidationError("Only unconfirmed publications or uploads waiting for a person can be settled.")
         published = request.data.get("published")
         if published not in (True, False):
             raise ValidationError({"published": "Say whether the post is live (true) or not (false)."})
         extra = {k: v for k, v in (target.extra or {}).items() if k != "maybe_live_since"}
+        provider = target.channel.get_provider()
         if published:
             url = (request.data.get("url") or "").strip()
             if url and not URL_RE.match(url):
                 raise ValidationError({"url": "Enter the post's address, starting with https://."})
             waiting = target.followers.filter(status=TargetStatus.SCHEDULED, scheduled_at__isnull=True)
-            if not url and waiting.exists():
-                raise ValidationError({"url": "Publications waiting for this one need its address."})
+            if not url and (handoff or waiting.exists()):
+                raise ValidationError({"url": "Paste the address of the post on the site."})
+            post_id = provider.post_id(url) if handoff and hasattr(provider, "post_id") else None
             now = timezone.now()
             target.status = TargetStatus.PUBLISHED
             target.published_at = now
             target.external_url = url[:1000]
-            target.last_error = "Marked as published by hand: statistics are not collected for it."
-            target.next_metrics_at = None
+            if post_id:
+                target.external_id = post_id[:500]
+            measurable = bool(post_id) and provider.capabilities.has_metrics
+            target.last_error = (
+                "Uploaded by hand."
+                if measurable
+                else "Marked as published by hand: statistics are not collected for it."
+            )
+            target.next_metrics_at = now if measurable else None
+        elif handoff:
+            target.status = TargetStatus.CANCELLED
+            target.last_error = "Not uploaded."
         else:
             target.status = TargetStatus.SCHEDULED
             target.scheduled_at = timezone.now()
@@ -433,6 +452,10 @@ class TargetViewSet(WorkspaceScopedMixin, mixins.RetrieveModelMixin, mixins.Upda
         if published:
             with transaction.atomic():
                 scheduling.release_followers(target)
+        elif handoff:
+            scheduling.note_followers(
+                target, f"{target.channel.name} was not uploaded, so there is nothing to link to.", fail=True
+            )
         else:
             from .tasks import dispatch_due_targets
 

@@ -88,6 +88,12 @@ class Workspace(TimeStamped):
     # Minimum gap between two posts on the same channel when auto-scheduling.
     min_gap_minutes = models.PositiveIntegerField(default=90)
     ai_enabled = models.BooleanField(default=True)
+    # Adult platforms (Pornhub, OnlyFans…) are only offered once an admin confirmed the content rules.
+    adult_content = models.BooleanField(default=False)
+    adult_confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    adult_confirmed_at = models.DateTimeField(null=True, blank=True)
     # UTM tags and short links on social posts: {"utm", "utm_medium", "short_links", "domains"}.
     link_tracking = models.JSONField(default=dict, blank=True)
     # Archived workspaces are read-only and publish nothing.

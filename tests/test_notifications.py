@@ -77,7 +77,15 @@ def test_telegram_status_bot_reports_failures(api, channel, fake_provider):
         r.data["has_bot_token"]
         and "bot_token" not in r.data
         and r.data["events"]
-        == sorted(["publication.failed", "publication.unconfirmed", "channel.needs_reconnect", "approval.requested"])
+        == sorted(
+            [
+                "publication.failed",
+                "publication.unconfirmed",
+                "publication.handoff",
+                "channel.needs_reconnect",
+                "approval.requested",
+            ]
+        )
     )
     send = respx.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage").mock(
         return_value=httpx.Response(200, json={"ok": True, "result": {}})

@@ -1481,6 +1481,85 @@ paths:
               schema:
                 $ref: '#/components/schemas/Channel'
           description: ''
+  /api/channels/{id}/upload-bot/:
+    get:
+      operationId: channels_upload_bot_retrieve
+      description: |-
+        Hand-off sites: {"upload_mode": "handoff"|"bot", "bot_cookies"?, "bot_recipe"?}; GET shows the state.
+
+        The cookies are stored encrypted and never returned.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+    post:
+      operationId: channels_upload_bot_create
+      description: |-
+        Hand-off sites: {"upload_mode": "handoff"|"bot", "bot_cookies"?, "bot_recipe"?}; GET shows the state.
+
+        The cookies are stored encrypted and never returned.
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this channel.
+        required: true
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
   /api/channels/connect/:
     post:
       operationId: channels_connect_create
@@ -5702,8 +5781,12 @@ paths:
   /api/targets/{id}/resolve/:
     post:
       operationId: targets_resolve_create
-      description: 'Settles an unconfirmed publication: {"published": true, "url":
-        ...} or {"published": false}.'
+      description: |-
+        Settles a publication a person had to check or upload.
+
+        Unconfirmed: {"published": true, "url"} (it is live) or {"published": false} (publish again).
+        Ready to upload: {"published": true, "url"} (uploaded; the address is required) or
+        {"published": false} (not uploading it: cancelled).
       parameters:
       - name: X-Workspace
         in: header
@@ -6654,6 +6737,7 @@ components:
       - post.published
       - publication.failed
       - publication.unconfirmed
+      - publication.handoff
       - channel.needs_reconnect
       - approval.requested
       - approval.approved
@@ -6666,6 +6750,7 @@ components:
         * `post.published` - Every channel of a post is live
         * `publication.failed` - A publication failed
         * `publication.unconfirmed` - A publication needs checking
+        * `publication.handoff` - A video or post is ready to upload by hand
         * `channel.needs_reconnect` - A channel needs to be reconnected
         * `approval.requested` - A post waits for approval
         * `approval.approved` - A post was approved
@@ -7616,6 +7701,11 @@ components:
         ai_enabled:
           type: boolean
         link_tracking: {}
+        adult_content:
+          type: boolean
+        adult_confirmation:
+          type: boolean
+          writeOnly: true
         organization:
           type: integer
         archived:
@@ -8051,6 +8141,7 @@ components:
       - published
       - partial
       - unconfirmed
+      - handoff
       - failed
       type: string
       description: |-
@@ -8060,6 +8151,7 @@ components:
         * `published` - Published
         * `partial` - Partially published
         * `unconfirmed` - Needs checking
+        * `handoff` - Ready to upload
         * `failed` - Failed
     ProviderEnum:
       enum:
@@ -8443,6 +8535,7 @@ components:
       - publishing
       - published
       - unconfirmed
+      - handoff
       - failed
       - cancelled
       type: string
@@ -8453,6 +8546,7 @@ components:
         * `publishing` - Publishing
         * `published` - Published
         * `unconfirmed` - Unconfirmed
+        * `handoff` - Ready to upload
         * `failed` - Failed
         * `cancelled` - Cancelled
     Team:
@@ -8631,6 +8725,13 @@ components:
             any is left this month.
           readOnly: true
         link_tracking: {}
+        adult_content:
+          type: boolean
+        adult_confirmed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
         role:
           type: string
           nullable: true
@@ -8660,6 +8761,7 @@ components:
           format: date-time
           readOnly: true
       required:
+      - adult_confirmed_at
       - ai_available
       - archived_at
       - created_at
@@ -8689,6 +8791,11 @@ components:
         ai_enabled:
           type: boolean
         link_tracking: {}
+        adult_content:
+          type: boolean
+        adult_confirmation:
+          type: boolean
+          writeOnly: true
         organization:
           type: integer
         archived:

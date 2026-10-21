@@ -110,6 +110,13 @@ class OrgCreateSerializer(serializers.Serializer):
         return value
 
 
+ADULT_CONFIRMATION = (
+    "Confirm that every person depicted is 18 or older and agreed to the publication, that the accounts used "
+    "belong to the performers who authorized you to post for them, and that the records each platform "
+    "requires (age and consent verification) are kept."
+)
+
+
 class WorkspaceSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     organization = serializers.PrimaryKeyRelatedField(queryset=Organization.objects.all(), required=False)
@@ -117,6 +124,7 @@ class WorkspaceSerializer(serializers.ModelSerializer):
     organization_slug = serializers.CharField(source="organization.slug", read_only=True)
     organization_role = serializers.SerializerMethodField()
     archived = serializers.BooleanField(required=False, write_only=True)
+    adult_confirmation = serializers.BooleanField(required=False, write_only=True)
     is_archived = serializers.SerializerMethodField()
     ai_available = serializers.SerializerMethodField()
 
@@ -131,6 +139,9 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "ai_enabled",
             "ai_available",
             "link_tracking",
+            "adult_content",
+            "adult_confirmation",
+            "adult_confirmed_at",
             "role",
             "organization",
             "organization_name",
@@ -141,7 +152,7 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "archived_at",
             "created_at",
         )
-        read_only_fields = ("id", "slug", "archived_at", "created_at")
+        read_only_fields = ("id", "slug", "archived_at", "adult_confirmed_at", "created_at")
 
     def get_role(self, obj) -> str | None:
         from .tenancy import effective_membership
@@ -158,6 +169,13 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             return None
         m = OrgMembership.objects.filter(organization_id=obj.organization_id, user=request.user).first()
         return m.role if m else None
+
+    def validate(self, attrs):
+        confirmed = attrs.pop("adult_confirmation", False)
+        turning_on = attrs.get("adult_content") and not (self.instance and self.instance.adult_content)
+        if turning_on and confirmed is not True:
+            raise serializers.ValidationError({"adult_confirmation": ADULT_CONFIRMATION})
+        return attrs
 
     def validate_link_tracking(self, value):
         if not isinstance(value, dict):

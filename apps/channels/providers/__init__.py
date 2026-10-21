@@ -1,3 +1,11 @@
+from .adult import (
+    FanslyProvider,
+    OnlyFansProvider,
+    PornhubProvider,
+    RedTubeProvider,
+    XHamsterProvider,
+    YouPornProvider,
+)
 from .base import (
     BaseProvider,
     Candidate,
@@ -58,8 +66,18 @@ REGISTRY: dict[str, type[BaseProvider]] = {
         BrevoProvider,
         ListmonkProvider,
         WebhookProvider,
+        PornhubProvider,
+        YouPornProvider,
+        RedTubeProvider,
+        XHamsterProvider,
+        OnlyFansProvider,
+        FanslyProvider,
     )
 }
+
+
+# Only offered in workspaces with adult content turned on.
+ADULT_PROVIDERS = frozenset(k for k, p in REGISTRY.items() if p.capabilities.adult)
 
 
 def get_provider(key) -> type[BaseProvider]:
@@ -70,6 +88,7 @@ def get_provider(key) -> type[BaseProvider]:
 
 
 __all__ = [
+    "ADULT_PROVIDERS",
     "REGISTRY",
     "get_provider",
     "BaseProvider",

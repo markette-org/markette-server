@@ -280,6 +280,11 @@ REDDIT_USER_AGENT = env("REDDIT_USER_AGENT", "")
 SLACK_CLIENT_ID = env("SLACK_CLIENT_ID", "")
 SLACK_CLIENT_SECRET = env("SLACK_CLIENT_SECRET", "")
 
+# --- Upload bot (sites without an upload API) --------------------------------------
+# True only where the "uploader" worker runs (compose profile "uploader"): channels in bot mode
+# are then published by it; otherwise they always fall back to the hand-off.
+UPLOAD_BOT_ENABLED = env_bool("UPLOAD_BOT_ENABLED", False)
+
 # --- Email (notifications) -----------------------------------------------------
 # Without EMAIL_HOST, email notifications are unavailable (Telegram and webhooks still work).
 EMAIL_HOST = env("EMAIL_HOST", "")

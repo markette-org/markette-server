@@ -16,7 +16,7 @@ from apps.tenants.models import Role
 from apps.tenants.tenancy import WorkspaceScopedMixin
 
 from .models import Channel, ConnectionRequest
-from .providers import REGISTRY, ProviderError, get_provider
+from .providers import ADULT_PROVIDERS, REGISTRY, ProviderError, get_provider
 from .serializers import ChannelSerializer, ConnectSerializer, SelectCandidatesSerializer
 from .services import candidate_to_dict, create_channels, public_candidate, set_relevance
 
@@ -57,6 +57,8 @@ class ChannelViewSet(
         ws = self.workspace
         qs = Channel.objects.prefetch_related("teams", "workspaces").filter(organization_id=ws.organization_id)
         qs = filter_channels(qs, self.membership)
+        if not ws.adult_content:
+            qs = qs.exclude(provider__in=ADULT_PROVIDERS)
         qs = qs.annotate(is_relevant=Exists(ChannelAccess.objects.filter(channel=OuterRef("pk"), workspace=ws)))
         if team := self.request.query_params.get("team"):
             qs = qs.filter(teams=team)
@@ -99,6 +101,10 @@ class ChannelViewSet(
         if key not in REGISTRY:
             raise ValidationError({"provider": "Unknown provider."})
         cls = get_provider(key)
+        if cls.capabilities.adult and not self.workspace.adult_content:
+            raise ValidationError(
+                {"provider": "Adult platforms are off in this workspace. An admin can turn them on in Settings."}
+            )
         if not cls.is_configured():
             raise ValidationError(
                 {"provider": f"{cls.label} is not configured on this server (missing app credentials)."}
@@ -258,6 +264,68 @@ class ChannelViewSet(
             return Response(provider.flairs())
         except ProviderError as exc:
             raise _reddit_error(channel, exc) from exc
+
+    @action(detail=True, methods=["get", "post"], url_path="upload-bot")
+    def upload_bot(self, request, pk=None):
+        """Hand-off sites: {"upload_mode": "handoff"|"bot", "bot_cookies"?, "bot_recipe"?}; GET shows the state.
+
+        The cookies are stored encrypted and never returned.
+        """
+        from .providers.uploader import bot_installed, parse_cookies
+
+        channel = self.get_object()
+        provider = channel.get_provider()
+        if not provider.capabilities.handoff:
+            raise ValidationError({"detail": f"{provider.label} publishes through its API; it has no upload bot."})
+        if request.method == "POST":
+            if not self.membership.has_role(Role.ADMIN):
+                raise PermissionDenied("Only workspace admins change the upload bot.")
+            config, creds = dict(channel.config or {}), dict(channel.credentials or {})
+            if cookies := (request.data.get("bot_cookies") or "").strip():
+                try:
+                    creds["bot_cookies"] = parse_cookies(cookies, provider.site)
+                except ProviderError as exc:
+                    raise ValidationError({"bot_cookies": str(exc)}) from exc
+            mode = request.data.get("upload_mode")
+            if mode in ("handoff", "bot"):
+                if mode == "bot" and not creds.get("bot_cookies"):
+                    raise ValidationError({"bot_cookies": "Paste the session cookies first."})
+                config["upload_mode"] = mode
+            if "bot_recipe" in request.data:
+                recipe = request.data["bot_recipe"]
+                if recipe not in (None, "", []) and not (
+                    isinstance(recipe, list) and all(isinstance(step, dict) for step in recipe)
+                ):
+                    raise ValidationError({"bot_recipe": "A list of steps (objects), or empty for the default."})
+                if recipe in (None, "", []):
+                    config.pop("bot_recipe", None)
+                else:
+                    config["bot_recipe"] = recipe
+            if request.data.get("test"):
+                if not bot_installed():
+                    raise ValidationError({"detail": "The upload bot is not installed on this server."})
+                from .tasks import test_upload_bot
+
+                config["bot_test"] = {"status": "running", "at": timezone.now().isoformat()}
+                channel.config, channel.credentials = config, creds
+                channel.save(update_fields=["config", "credentials", "updated_at"])
+                test_upload_bot.apply_async(args=[channel.pk], queue="uploads")
+            else:
+                channel.config, channel.credentials = config, creds
+                channel.save(update_fields=["config", "credentials", "updated_at"])
+        from .providers.uploader import RECIPES
+
+        config = channel.config or {}
+        return Response(
+            {
+                "installed": bot_installed(),
+                "upload_mode": config.get("upload_mode", "handoff"),
+                "has_cookies": bool((channel.credentials or {}).get("bot_cookies")),
+                "recipe": config.get("bot_recipe") or RECIPES.get(channel.provider, []),
+                "custom_recipe": bool(config.get("bot_recipe")),
+                "test": config.get("bot_test"),
+            }
+        )
 
     @action(detail=True, methods=["get", "post"], url_path="import-history")
     def import_history(self, request, pk=None):

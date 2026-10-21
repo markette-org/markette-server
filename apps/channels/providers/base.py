@@ -73,6 +73,10 @@ class Capabilities:
     inbox_reply: bool = False
     # Past posts can be imported (fetch_history) for analytics and best times.
     history: bool = False
+    # Adult platform: only in workspaces where an admin turned adult content on.
+    adult: bool = False
+    # No upload API: a person (or the optional upload bot) finishes publishing on the site.
+    handoff: bool = False
 
 
 @dataclass
@@ -247,6 +251,8 @@ class BaseProvider:
             "inbox": caps.inbox,
             "inbox_reply": caps.inbox_reply,
             "history": caps.history,
+            "adult": caps.adult,
+            "handoff": caps.handoff,
         }
 
     # --- connection ------------------------------------------------------

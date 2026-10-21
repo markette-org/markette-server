@@ -15,6 +15,7 @@ class Event(models.TextChoices):
     POST_PUBLISHED = "post.published", "Every channel of a post is live"
     FAILED = "publication.failed", "A publication failed"
     UNCONFIRMED = "publication.unconfirmed", "A publication needs checking"
+    HANDOFF = "publication.handoff", "A video or post is ready to upload by hand"
     RECONNECT = "channel.needs_reconnect", "A channel needs to be reconnected"
     APPROVAL_REQUESTED = "approval.requested", "A post waits for approval"
     APPROVED = "approval.approved", "A post was approved"
@@ -24,7 +25,7 @@ class Event(models.TextChoices):
 
 
 # What a new destination listens to unless told otherwise: the things someone has to act on.
-DEFAULT_EVENTS = [Event.FAILED, Event.UNCONFIRMED, Event.RECONNECT, Event.APPROVAL_REQUESTED]
+DEFAULT_EVENTS = [Event.FAILED, Event.UNCONFIRMED, Event.HANDOFF, Event.RECONNECT, Event.APPROVAL_REQUESTED]
 
 
 class Kind(models.TextChoices):

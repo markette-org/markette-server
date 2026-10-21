@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.channels.models import Channel
+from apps.channels.providers import ADULT_PROVIDERS
 from apps.channels.serializers import ChannelSerializer
 from apps.teams import access
 
@@ -168,6 +169,8 @@ class TargetSerializer(serializers.ModelSerializer):
         membership = self.context.get("membership")
         if membership and not access.can_use_channel(membership, channel):
             raise serializers.ValidationError("You are not in a team that publishes to this channel.")
+        if channel.provider in ADULT_PROVIDERS and not self.context["workspace"].adult_content:
+            raise serializers.ValidationError("Adult platforms are off in this workspace.")
         return channel
 
 

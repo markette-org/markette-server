@@ -173,6 +173,11 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
             if not archived:
                 limits.check_workspace_limit(ws.organization)
             serializer.validated_data["archived_at"] = timezone.now() if archived else None
+        adult = serializer.validated_data.get("adult_content")
+        if adult is not None and adult != ws.adult_content:
+            if adult:
+                serializer.validated_data["adult_confirmed_by"] = self.request.user
+                serializer.validated_data["adult_confirmed_at"] = timezone.now()
         serializer.save()
 
     def perform_destroy(self, instance):

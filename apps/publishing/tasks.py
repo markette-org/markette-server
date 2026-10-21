@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from apps.channels.models import ChannelStatus
 from apps.channels.providers import Content, MediaItem, ProviderError
+from apps.channels.providers.uploader import HandoffRequired
 from apps.notifications.events import emit_for_post, emit_for_target
 from apps.notifications.models import Event
 from apps.platform import conf
@@ -172,6 +173,8 @@ def publish_target(target_id):
             target.scheduled_at = None
             target.save(update_fields=["status", "scheduled_at", "updated_at"])
             return "waiting"
+        if _route_to_uploader(target):
+            return "sent to the upload bot"
         target.status = TargetStatus.PUBLISHING
         target.attempts += 1
         target.save(update_fields=["status", "attempts", "updated_at"])
@@ -195,6 +198,8 @@ def publish_target(target_id):
             result = provider.publish(content)
     except CannotCheck as exc:
         return mark_unconfirmed(target, str(exc))
+    except HandoffRequired as exc:
+        return mark_handoff(target, provider, content, exc)
     except ProviderError as exc:
         return _handle_failure(target, exc, provider, started if sending else None)
     except Exception as exc:  # noqa: BLE001 - a bug must not leave the target stuck in "publishing"
@@ -334,6 +339,44 @@ def continue_thread(target, provider=None, parts=None):
         target.last_error = ""
         target.save(update_fields=["last_error", "updated_at"])
     return True
+
+
+def _route_to_uploader(target):
+    """Channels in upload-bot mode are published by the separate uploader worker (Playwright)."""
+    from apps.channels.providers.uploader import bot_installed, in_uploader
+
+    provider = target.channel.get_provider()
+    if in_uploader() or not provider.capabilities.handoff or not getattr(provider, "uses_bot", False):
+        return False
+    if not bot_installed():
+        return False  # publish() falls back to the hand-off and says why
+    routed = (target.extra or {}).get("bot_routed", 0)
+    if routed >= 2:
+        return False  # the uploader never answered: hand it off instead of looping
+    target.extra = {**(target.extra or {}), "bot_routed": routed + 1}
+    target.save(update_fields=["extra", "updated_at"])
+    pk = target.pk
+    transaction.on_commit(lambda: publish_target.apply_async(args=[pk], queue="uploads"))
+    return True
+
+
+def mark_handoff(target, provider, content, exc):
+    """Everything is ready; a person uploads it on the site and pastes the new post's address."""
+    target.status = TargetStatus.HANDOFF
+    target.next_attempt_at = None
+    target.extra = {**(target.extra or {}), "handoff": provider.handoff(content)}
+    target.extra.pop("bot_routed", None)
+    note = str(exc)
+    if exc.maybe_uploaded:
+        note += " It may already be on the site: check your account before uploading it again."
+    target.last_error = note[:4000]
+    target.save(update_fields=["status", "next_attempt_at", "extra", "last_error", "updated_at"])
+    target.post.refresh_status()
+    from .scheduling import note_followers
+
+    note_followers(target, f"Waiting for {target.channel.name} to be uploaded.")
+    emit_for_target(target, Event.HANDOFF)
+    return target.status
 
 
 class CannotCheck(Exception):

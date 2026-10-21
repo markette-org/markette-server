@@ -38,6 +38,7 @@ OVERRIDABLE = {
     "EMAIL_HOST_USER": str,
     "EMAIL_USE_TLS": bool,
     "DEFAULT_FROM_EMAIL": str,
+    "UPLOAD_BOT_ENABLED": bool,
 }
 SECRETS = (
     "X_CLIENT_SECRET",
