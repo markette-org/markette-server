@@ -881,6 +881,7 @@ paths:
           - discord
           - drupal
           - facebook
+          - fansly
           - ghost
           - hugo
           - instagram
@@ -888,16 +889,22 @@ paths:
           - listmonk
           - mastodon
           - medium
+          - onlyfans
+          - pornhub
           - qq
           - reddit
+          - redtube
           - slack
           - telegram
+          - telegram_user
           - threads
           - webhook
           - wechat
           - whatsapp
           - wordpress
           - x
+          - xhamster
+          - youporn
           - youtube
         description: |-
           * `x` - X
@@ -924,6 +931,13 @@ paths:
           * `medium` - Medium
           * `devto` - DEV
           * `hugo` - Hugo (git)
+          * `telegram_user` - Telegram (personal account)
+          * `pornhub` - Pornhub
+          * `youporn` - YouPorn
+          * `redtube` - RedTube
+          * `xhamster` - xHamster
+          * `onlyfans` - OnlyFans
+          * `fansly` - Fansly
       - name: search
         required: false
         in: query
@@ -1667,6 +1681,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/Channel'
           description: ''
+  /api/channels/telegram-login/:
+    post:
+      operationId: channels_telegram_login_create
+      description: |-
+        Signs in a Telegram personal account, step by step.
+
+        {"step": "start", "api_id", "api_hash", "phone"} sends the login code and returns a request_id;
+        {"step": "code", "request_id", "code", "password"?} signs in (answers {"needs": "password"} when the
+        account has two-step verification) and returns the request_id whose chats can then be picked.
+      tags:
+      - channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelRequest'
+        required: true
+      security:
+      - apiToken: []
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+          description: ''
+      parameters:
+      - name: X-Workspace
+        in: header
+        required: true
+        description: Slug (or id) of the workspace to act in. List yours with `GET
+          /api/workspaces/`.
+        schema:
+          type: string
+          example: acme
   /api/inbox/:
     get:
       operationId: inbox_list
@@ -8179,6 +8235,13 @@ components:
       - medium
       - devto
       - hugo
+      - telegram_user
+      - pornhub
+      - youporn
+      - redtube
+      - xhamster
+      - onlyfans
+      - fansly
       type: string
       description: |-
         * `x` - X
@@ -8205,6 +8268,13 @@ components:
         * `medium` - Medium
         * `devto` - DEV
         * `hugo` - Hugo (git)
+        * `telegram_user` - Telegram (personal account)
+        * `pornhub` - Pornhub
+        * `youporn` - YouPorn
+        * `redtube` - RedTube
+        * `xhamster` - xHamster
+        * `onlyfans` - OnlyFans
+        * `fansly` - Fansly
     RegisterRequest:
       type: object
       properties:

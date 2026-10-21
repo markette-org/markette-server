@@ -265,6 +265,68 @@ class ChannelViewSet(
         except ProviderError as exc:
             raise _reddit_error(channel, exc) from exc
 
+    @action(detail=False, methods=["post"], url_path="telegram-login")
+    def telegram_login(self, request):
+        """Signs in a Telegram personal account, step by step.
+
+        {"step": "start", "api_id", "api_hash", "phone"} sends the login code and returns a request_id;
+        {"step": "code", "request_id", "code", "password"?} signs in (answers {"needs": "password"} when the
+        account has two-step verification) and returns the request_id whose chats can then be picked.
+        """
+        from .providers.telegram_user import login_finish, login_start
+
+        step = request.data.get("step")
+        if step == "start":
+            api_id = str(request.data.get("api_id") or "").strip()
+            api_hash = str(request.data.get("api_hash") or "").strip()
+            phone = str(request.data.get("phone") or "").replace(" ", "").strip()
+            if not api_id.isdigit() or not api_hash or not phone.startswith("+"):
+                raise ValidationError(
+                    {"detail": "Enter the API ID (a number), the API hash and the phone number with +country code."}
+                )
+            try:
+                pending = login_start(api_id, api_hash, phone)
+            except ProviderError as exc:
+                raise ValidationError({"detail": str(exc)}) from exc
+            conn = ConnectionRequest.objects.create(
+                workspace=self.workspace,
+                user=request.user,
+                provider="telegram_user",
+                secrets={"api_id": api_id, "api_hash": api_hash, "phone": phone, "pending": pending},
+            )
+            return Response({"request_id": conn.id, "sent": True})
+        if step == "code":
+            conn = get_object_or_404(
+                ConnectionRequest,
+                pk=request.data.get("request_id"),
+                workspace=self.workspace,
+                user=request.user,
+                provider="telegram_user",
+                completed_at__isnull=True,
+            )
+            if conn.expired:
+                raise ValidationError({"detail": "This sign-in expired; start again."})
+            sec = conn.secrets
+            try:
+                session, found = login_finish(
+                    sec["pending"],
+                    sec["api_id"],
+                    sec["api_hash"],
+                    sec["phone"],
+                    code=str(request.data.get("code") or "").strip(),
+                    password=str(request.data.get("password") or ""),
+                )
+            except ProviderError as exc:
+                body = {"detail": str(exc)}
+                if isinstance(exc.payload, dict) and exc.payload.get("needs"):
+                    body["needs"] = exc.payload["needs"]
+                raise ValidationError(body) from exc
+            conn.candidates = {"items": [candidate_to_dict(c) for c in found]}
+            conn.secrets = {}  # the session now lives in the candidates (encrypted), then in the channels
+            conn.save(update_fields=["candidates", "secrets", "updated_at"])
+            return Response({"request_id": conn.id, "count": len(found)})
+        raise ValidationError({"step": "start or code."})
+
     @action(detail=True, methods=["get", "post"], url_path="upload-bot")
     def upload_bot(self, request, pk=None):
         """Hand-off sites: {"upload_mode": "handoff"|"bot", "bot_cookies"?, "bot_recipe"?}; GET shows the state.

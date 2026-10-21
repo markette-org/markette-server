@@ -32,6 +32,7 @@ from .qq import QQProvider
 from .reddit import RedditProvider
 from .slack import SlackProvider
 from .telegram import TelegramProvider
+from .telegram_user import TelegramUserProvider
 from .threads import ThreadsProvider
 from .webhook import WebhookProvider
 from .wechat import WeChatProvider
@@ -52,6 +53,7 @@ REGISTRY: dict[str, type[BaseProvider]] = {
         InstagramProvider,
         YouTubeProvider,
         TelegramProvider,
+        TelegramUserProvider,
         WhatsAppProvider,
         WeChatProvider,
         QQProvider,

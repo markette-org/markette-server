@@ -27,6 +27,7 @@ dependencies = [
     "pydantic>=2.10",
     "gunicorn>=23",
     "whitenoise>=6.9",
+    "telethon>=1.40",
 ]
 
 [dependency-groups]

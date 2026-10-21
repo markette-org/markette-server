@@ -36,6 +36,13 @@ class Provider(models.TextChoices):
     MEDIUM = "medium", "Medium"
     DEVTO = "devto", "DEV"
     HUGO = "hugo", "Hugo (git)"
+    TELEGRAM_USER = "telegram_user", "Telegram (personal account)"
+    PORNHUB = "pornhub", "Pornhub"
+    YOUPORN = "youporn", "YouPorn"
+    REDTUBE = "redtube", "RedTube"
+    XHAMSTER = "xhamster", "xHamster"
+    ONLYFANS = "onlyfans", "OnlyFans"
+    FANSLY = "fansly", "Fansly"
 
 
 class ChannelStatus(models.TextChoices):
