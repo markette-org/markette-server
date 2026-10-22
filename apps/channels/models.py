@@ -43,6 +43,13 @@ class Provider(models.TextChoices):
     XHAMSTER = "xhamster", "xHamster"
     ONLYFANS = "onlyfans", "OnlyFans"
     FANSLY = "fansly", "Fansly"
+    FANVUE = "fanvue", "Fanvue"
+    XVIDEOS = "xvideos", "XVideos"
+    XNXX = "xnxx", "XNXX"
+    SPANKBANG = "spankbang", "SpankBang"
+    EPORNER = "eporner", "Eporner"
+    MANYVIDS = "manyvids", "ManyVids"
+    CLIPS4SALE = "clips4sale", "Clips4Sale"
 
 
 class ChannelStatus(models.TextChoices):

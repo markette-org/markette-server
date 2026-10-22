@@ -279,3 +279,148 @@ def test_bot_recipe_runs_and_falls_back(workspace, tmp_path, monkeypatch):
     monkeypatch.setattr(up, "_browser", lambda provider: fake_playwright(page))
     report = up.run(PornhubProvider(ch), dry_run=True)["report"]
     assert page.actions == [] and any(r.get("found") is False for r in report)
+
+
+def test_more_post_ids():
+    from apps.channels.providers.adult import (
+        Clips4SaleProvider,
+        EpornerProvider,
+        ManyVidsProvider,
+        SpankBangProvider,
+        XnxxProvider,
+        XVideosProvider,
+    )
+
+    assert XVideosProvider().post_id("https://www.xvideos.com/video.okhpuvd1234/my_clip") == "okhpuvd1234"
+    assert XnxxProvider().post_id("https://www.xnxx.com/video-1abc2/my_clip") == "1abc2"
+    assert SpankBangProvider().post_id("https://spankbang.com/8xyz/video/my+clip") == "8xyz"
+    assert EpornerProvider().post_id("https://www.eporner.com/video-jAU0fEPoVX8/title/") == "jAU0fEPoVX8"
+    assert ManyVidsProvider().post_id("https://www.manyvids.com/Video/5551234/my-clip") == "5551234"
+    assert Clips4SaleProvider().post_id("https://www.clips4sale.com/studio/123456/7654321/my-clip") == "7654321"
+    assert Clips4SaleProvider().username_from("https://www.clips4sale.com/studio/123456/my-studio") == "123456"
+    assert ManyVidsProvider().username_from("https://www.manyvids.com/Profile/1234567/jane/") == "jane"
+
+
+@respx.mock
+def test_eporner_views(workspace):
+    from apps.channels.providers.adult import EpornerProvider
+
+    ch = Channel(organization=workspace.organization, provider="eporner", external_id="jane", credentials={})
+    respx.get("https://www.eporner.com/api/v2/video/id/").mock(
+        return_value=httpx.Response(200, json={"id": "abc", "views": 798, "rate": "3.75"})
+    )
+    assert EpornerProvider(ch).fetch_metrics(["abc"])["abc"].impressions == 798
+
+
+@pytest.fixture
+def fanvue_app(settings):
+    from apps.platform import conf
+
+    settings.FANVUE_CLIENT_ID, settings.FANVUE_CLIENT_SECRET = "fv-id", "fv-secret"
+    conf.invalidate()
+    yield
+    settings.FANVUE_CLIENT_ID = settings.FANVUE_CLIENT_SECRET = ""
+    conf.invalidate()
+
+
+@respx.mock
+def test_fanvue_sign_in_publish_metrics_and_comments(api, workspace, fanvue_app, tmp_path):
+    import base64
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs, urlparse
+
+    from apps.channels.providers.fanvue import API, FanvueProvider
+
+    turn_on(api, workspace)
+    r = api.post("/api/channels/connect/", {"provider": "fanvue"}, format="json")
+    q = parse_qs(urlparse(r.data["authorize_url"]).query)
+    assert q["code_challenge_method"] == ["S256"] and "write:post" in q["scope"][0]
+    token = respx.post("https://auth.fanvue.com/oauth2/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "at", "refresh_token": "rt", "expires_in": 3600})
+    )
+    respx.get(f"{API}/users/me").mock(
+        return_value=httpx.Response(
+            200, json={"uuid": "u-1", "handle": "jane", "displayName": "Jane", "isCreator": True}
+        )
+    )
+    [cand] = FanvueProvider().complete_oauth(SimpleNamespace(secrets={"code_verifier": "v"}), {"code": "c"})
+    req = token.calls.last.request
+    assert req.headers["authorization"] == "Basic " + base64.b64encode(b"fv-id:fv-secret").decode()
+    assert "client_secret" not in req.content.decode() and cand.profile_url == "https://www.fanvue.com/jane"
+
+    from django.utils import timezone
+
+    ch = Channel.create_for(
+        workspace=workspace,
+        provider="fanvue",
+        external_id="u-1",
+        name="Jane",
+        credentials={"access_token": "at", "refresh_token": "rt"},
+        config={"handle": "jane"},
+        token_expires_at=timezone.now() + timezone.timedelta(hours=1),
+    )
+    p = tmp_path / "v.mp4"
+    p.write_bytes(b"x" * 10)
+    respx.post(f"{API}/media/uploads").mock(
+        return_value=httpx.Response(201, json={"mediaUuid": "m-1", "uploadId": "up1", "partSize": 6, "totalParts": 2})
+    )
+    respx.get(f"{API}/media/uploads/up1/parts/urls").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "parts": [
+                    {"partNumber": 1, "url": "https://s3.example/p1"},
+                    {"partNumber": 2, "url": "https://s3.example/p2"},
+                ]
+            },
+        )
+    )
+    put1 = respx.put("https://s3.example/p1").mock(return_value=httpx.Response(200, headers={"etag": '"e1"'}))
+    respx.put("https://s3.example/p2").mock(return_value=httpx.Response(200, headers={"etag": '"e2"'}))
+    complete = respx.patch(f"{API}/media/uploads/up1").mock(
+        return_value=httpx.Response(200, json={"status": "processing"})
+    )
+    respx.get(f"{API}/media/m-1").mock(return_value=httpx.Response(200, json={"status": "ready"}))
+    post = respx.post(f"{API}/posts").mock(return_value=httpx.Response(201, json={"uuid": "post-1"}))
+    provider = FanvueProvider(ch)
+    content = Content(
+        text="New set",
+        options={"audience": "followers-and-subscribers", "price": "9.99"},
+        media=[MediaItem(path=p, url="u", mime="video/mp4", filename="v.mp4")],
+    )
+    assert provider.validate(content) == []
+    res = provider.publish(content)
+    assert res.external_id == "post-1" and put1.calls.last.request.content == b"x" * 6
+    assert "authorization" not in put1.calls.last.request.headers
+    assert json.loads(complete.calls.last.request.content) == {
+        "parts": [{"PartNumber": 1, "ETag": '"e1"'}, {"PartNumber": 2, "ETag": '"e2"'}]
+    }
+    body = json.loads(post.calls.last.request.content)
+    assert body == {"text": "New set", "audience": "followers-and-subscribers", "price": 999, "mediaUuids": ["m-1"]}
+    assert post.calls.last.request.headers["x-fanvue-api-version"] == "2025-06-26"
+    assert any("3.00" in x for x in provider.validate(Content(text="x", options={"price": "1"})))
+
+    respx.get(f"{API}/posts/post-1").mock(return_value=httpx.Response(200, json={"likesCount": 12, "commentsCount": 3}))
+    m = provider.fetch_metrics(["post-1"])["post-1"]
+    assert (m.likes, m.comments) == (12, 3)
+    respx.get(f"{API}/posts/post-1/comments").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "uuid": "c-1",
+                        "text": "Love it",
+                        "user": {"uuid": "fan-1", "handle": "bob", "displayName": "Bob"},
+                        "createdAt": "2026-10-21T10:00:00Z",
+                    },
+                    {"uuid": "c-2", "text": "Thanks!", "user": {"uuid": "u-1", "handle": "jane"}},
+                ]
+            },
+        )
+    )
+    entries, _ = provider.fetch_inbox({}, ["post-1"])
+    assert [e.external_id for e in entries] == ["c-1"]
+    reply = respx.post(f"{API}/posts/post-1/comments").mock(return_value=httpx.Response(201, json={"uuid": "c-3"}))
+    provider.reply_inbox(entries[0], "Thank you")
+    assert json.loads(reply.calls.last.request.content) == {"text": "@bob Thank you"}

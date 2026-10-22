@@ -1,9 +1,15 @@
 from .adult import (
+    Clips4SaleProvider,
+    EpornerProvider,
     FanslyProvider,
+    ManyVidsProvider,
     OnlyFansProvider,
     PornhubProvider,
     RedTubeProvider,
+    SpankBangProvider,
     XHamsterProvider,
+    XnxxProvider,
+    XVideosProvider,
     YouPornProvider,
 )
 from .base import (
@@ -22,6 +28,7 @@ from .blogs import DrupalProvider, WordPressProvider
 from .bluesky import BlueskyProvider
 from .devto import DevtoProvider
 from .discord import DiscordProvider
+from .fanvue import FanvueProvider
 from .hugo import HugoProvider
 from .linkedin import LinkedInProvider
 from .mastodon import MastodonProvider
@@ -74,6 +81,13 @@ REGISTRY: dict[str, type[BaseProvider]] = {
         XHamsterProvider,
         OnlyFansProvider,
         FanslyProvider,
+        FanvueProvider,
+        XVideosProvider,
+        XnxxProvider,
+        SpankBangProvider,
+        EpornerProvider,
+        ManyVidsProvider,
+        Clips4SaleProvider,
     )
 }
 

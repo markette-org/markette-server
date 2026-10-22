@@ -117,7 +117,8 @@ class AdultProvider(BaseProvider):
         """What a person needs to upload it by hand."""
         return {
             "site": self.label,
-            "upload_url": self.upload_url,
+            # A channel can point to another page (e.g. a studio's own upload area).
+            "upload_url": (self.channel.config or {}).get("upload_url") or self.upload_url,
             "title": content.title,
             "description": content.text,
             "tags": list((content.options or {}).get("tags") or content.tags or []),
@@ -249,3 +250,111 @@ def _int(value):
         return int(str(value).replace(",", ""))
     except (TypeError, ValueError):
         return None
+
+
+# --- more tube sites and clip stores (hand-off; the upload pages are the sites' public ones) -----------------
+class XVideosProvider(AdultProvider):
+    key = "xvideos"
+    label = "XVideos"
+    site = "www.xvideos.com"
+    upload_url = "https://www.xvideos.com/account/uploads/new"
+    profile_hint = "https://www.xvideos.com/profiles/yourname"
+    capabilities = Capabilities(**{**VIDEO_SITE, "has_metrics": False, "metric_names": ()})
+
+    def post_id(self, url):
+        m = re.search(r"/video\.?([\w]+)", urlparse(url).path)
+        return m.group(1) if m else None
+
+
+class XnxxProvider(AdultProvider):
+    key = "xnxx"
+    label = "XNXX"
+    site = "www.xnxx.com"
+    upload_url = "https://www.xnxx.com/"
+    profile_hint = "https://www.xnxx.com/porn-maker/yourname"
+    capabilities = Capabilities(**{**VIDEO_SITE, "has_metrics": False, "metric_names": ()})
+
+    def post_id(self, url):
+        m = re.search(r"/video-([\w]+)", urlparse(url).path)
+        return m.group(1) if m else None
+
+
+class SpankBangProvider(AdultProvider):
+    key = "spankbang"
+    label = "SpankBang"
+    site = "spankbang.com"
+    upload_url = "https://spankbang.com/users/upload"
+    profile_hint = "https://spankbang.com/profile/yourname"
+    capabilities = Capabilities(**{**VIDEO_SITE, "has_metrics": False, "metric_names": ()})
+
+    def post_id(self, url):
+        m = re.match(r"/(\w+)/video/", urlparse(url).path)
+        return m.group(1) if m else None
+
+
+class EpornerProvider(AdultProvider):
+    key = "eporner"
+    label = "Eporner"
+    site = "www.eporner.com"
+    upload_url = "https://www.eporner.com/upload/"
+    profile_hint = "https://www.eporner.com/profile/yourname/"
+    capabilities = Capabilities(**VIDEO_SITE)
+
+    def post_id(self, url):
+        m = re.search(r"/(?:video-|hd-porn/)(\w+)", urlparse(url).path)
+        return m.group(1) if m else None
+
+    def fetch_metrics(self, external_ids):
+        out = {}
+        for vid in external_ids:
+            v = self.http(
+                "GET", "https://www.eporner.com/api/v2/video/id/", params={"id": vid, "format": "json"}
+            ).json()
+            if isinstance(v, dict) and v.get("id"):
+                out[vid] = Metrics(impressions=_int(v.get("views")), raw={"rate": v.get("rate")})
+        return out
+
+
+CLIP_STORE = {**VIDEO_SITE, "has_metrics": False, "metric_names": ()}
+
+
+class ManyVidsProvider(AdultProvider):
+    key = "manyvids"
+    label = "ManyVids"
+    site = "www.manyvids.com"
+    upload_url = "https://www.manyvids.com/Upload-vids/"
+    profile_hint = "https://www.manyvids.com/Profile/1234567/yourname/"
+    capabilities = Capabilities(**CLIP_STORE)
+
+    def username_from(self, profile):
+        parts = [
+            p for p in urlparse(profile if "://" in profile else f"https://{self.site}/{profile}").path.split("/") if p
+        ]
+        # /Profile/<id>/<name>/: the name is the last part, the id stays in the address.
+        return parts[-1] if parts else ""
+
+    def post_id(self, url):
+        m = re.search(r"/Video/(\d+)", urlparse(url).path, re.I)
+        return m.group(1) if m else None
+
+
+class Clips4SaleProvider(AdultProvider):
+    key = "clips4sale"
+    label = "Clips4Sale"
+    site = "www.clips4sale.com"
+    upload_url = "https://admin.clips4sale.com/"
+    profile_hint = "https://www.clips4sale.com/studio/123456/your-studio"
+    capabilities = Capabilities(**CLIP_STORE)
+
+    def username_from(self, profile):
+        parts = [
+            p for p in urlparse(profile if "://" in profile else f"https://{self.site}/{profile}").path.split("/") if p
+        ]
+        # /studio/<id>/<name>: the studio id is what identifies it.
+        if len(parts) >= 2 and parts[0].lower() == "studio":
+            return parts[1]
+        return parts[-1] if parts else ""
+
+    def post_id(self, url):
+        m = re.search(r"/studio/\d+/(\d+)", urlparse(url).path)
+        return m.group(1) if m else None

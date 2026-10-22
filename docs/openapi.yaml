@@ -877,16 +877,20 @@ paths:
           enum:
           - bluesky
           - brevo
+          - clips4sale
           - devto
           - discord
           - drupal
+          - eporner
           - facebook
           - fansly
+          - fanvue
           - ghost
           - hugo
           - instagram
           - linkedin
           - listmonk
+          - manyvids
           - mastodon
           - medium
           - onlyfans
@@ -895,6 +899,7 @@ paths:
           - reddit
           - redtube
           - slack
+          - spankbang
           - telegram
           - telegram_user
           - threads
@@ -904,6 +909,8 @@ paths:
           - wordpress
           - x
           - xhamster
+          - xnxx
+          - xvideos
           - youporn
           - youtube
         description: |-
@@ -938,6 +945,13 @@ paths:
           * `xhamster` - xHamster
           * `onlyfans` - OnlyFans
           * `fansly` - Fansly
+          * `fanvue` - Fanvue
+          * `xvideos` - XVideos
+          * `xnxx` - XNXX
+          * `spankbang` - SpankBang
+          * `eporner` - Eporner
+          * `manyvids` - ManyVids
+          * `clips4sale` - Clips4Sale
       - name: search
         required: false
         in: query
@@ -8242,6 +8256,13 @@ components:
       - xhamster
       - onlyfans
       - fansly
+      - fanvue
+      - xvideos
+      - xnxx
+      - spankbang
+      - eporner
+      - manyvids
+      - clips4sale
       type: string
       description: |-
         * `x` - X
@@ -8275,6 +8296,13 @@ components:
         * `xhamster` - xHamster
         * `onlyfans` - OnlyFans
         * `fansly` - Fansly
+        * `fanvue` - Fanvue
+        * `xvideos` - XVideos
+        * `xnxx` - XNXX
+        * `spankbang` - SpankBang
+        * `eporner` - Eporner
+        * `manyvids` - ManyVids
+        * `clips4sale` - Clips4Sale
     RegisterRequest:
       type: object
       properties:

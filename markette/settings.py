@@ -279,6 +279,9 @@ REDDIT_USER_AGENT = env("REDDIT_USER_AGENT", "")
 # Slack app for "Add to Slack" (optional: without it users paste a bot token)
 SLACK_CLIENT_ID = env("SLACK_CLIENT_ID", "")
 SLACK_CLIENT_SECRET = env("SLACK_CLIENT_SECRET", "")
+# Fanvue app (fanvue.com → creator settings → developer): redirect URI {PUBLIC_API_URL}/api/oauth/fanvue/callback
+FANVUE_CLIENT_ID = env("FANVUE_CLIENT_ID", "")
+FANVUE_CLIENT_SECRET = env("FANVUE_CLIENT_SECRET", "")
 
 # --- Upload bot (sites without an upload API) --------------------------------------
 # True only where the "uploader" worker runs (compose profile "uploader"): channels in bot mode

@@ -91,6 +91,14 @@ DESCRIPTION = "textarea[name*='desc' i], textarea[placeholder*='desc' i], textar
 TAGS = "input[name*='tag' i], input[placeholder*='tag' i]"
 FILE = "input[type=file]"
 
+GENERIC_VIDEO = [
+    {"file": FILE},
+    {"fill": TITLE, "value": "title"},
+    {"fill": DESCRIPTION, "value": "description"},
+    {"fill": TAGS, "value": "tags"},
+    {"click": "button[type=submit], input[type=submit]", "submit": True},
+]
+
 RECIPES = {
     "pornhub": [
         {"goto": "https://www.pornhub.com/upload/videodata"},
@@ -145,6 +153,50 @@ RECIPES = {
         {"result_url": r"/post/\d+"},
     ],
 }
+
+
+RECIPES.update(
+    {
+        "xvideos": [
+            {"goto": "https://www.xvideos.com/account/uploads/new"},
+            {"logged_in": "a[href*='/account'], a[href*='logout']"},
+            *GENERIC_VIDEO,
+            {"result_url": r"xvideos\.com/video\.?\w+"},
+        ],
+        "xnxx": [
+            {"goto": "https://www.xnxx.com/"},
+            {"logged_in": "a[href*='/account'], a[href*='logout']"},
+            *GENERIC_VIDEO,
+            {"result_url": r"xnxx\.com/video-\w+"},
+        ],
+        "spankbang": [
+            {"goto": "https://spankbang.com/users/upload"},
+            {"logged_in": "a[href*='/users/'], a[href*='logout']"},
+            *GENERIC_VIDEO,
+            {"result_url": r"spankbang\.com/\w+/video/"},
+        ],
+        "eporner": [
+            {"goto": "https://www.eporner.com/upload/"},
+            {"logged_in": "a[href*='/profile/'], a[href*='logout']"},
+            *GENERIC_VIDEO,
+            {"result_url": r"eporner\.com/(video-|hd-porn/)\w+"},
+        ],
+        "manyvids": [
+            {"goto": "https://www.manyvids.com/Upload-vids/"},
+            {"logged_in": "a[href*='/Profile/'], a[href*='logout' i]"},
+            *GENERIC_VIDEO,
+            {"fill": "input[name*='price' i]", "value": "price"},
+            {"result_url": r"manyvids\.com/Video/\d+"},
+        ],
+        "clips4sale": [
+            {"goto": "https://admin.clips4sale.com/"},
+            {"logged_in": "a[href*='logout' i], [class*='studio' i]"},
+            *GENERIC_VIDEO,
+            {"fill": "input[name*='price' i]", "value": "price"},
+            {"result_url": r"clips4sale\.com/studio/\d+/\d+"},
+        ],
+    }
+)
 
 
 def recipe_for(provider):
